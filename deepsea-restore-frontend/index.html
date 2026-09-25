@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DeepSea Restore — RL-Based Underwater Image Restoration</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="wrap topbar-inner">
+    <span class="brand">DeepSea Restore</span>
+    <nav class="topnav">
+      <a href="#demo">Demo</a>
+      <a href="#method">Method</a>
+      <a href="#metrics">Metrics</a>
+      <a href="#team">Team split</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+  <section class="hero">
+    <svg class="hero-waves" viewBox="0 0 1200 140" preserveAspectRatio="none" aria-hidden="true">
+      <path d="M0,80 C200,20 350,120 600,70 C850,20 1000,120 1200,60 L1200,140 L0,140 Z" fill="url(#waveGrad)"/>
+      <defs>
+        <linearGradient id="waveGrad" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stop-color="#3FD8C8" stop-opacity="0.18"/>
+          <stop offset="100%" stop-color="#E8935E" stop-opacity="0.12"/>
+        </linearGradient>
+      </defs>
+    </svg>
+    <div class="wrap hero-inner">
+      <p class="eyebrow">Reinforcement learning · Image restoration</p>
+      <h1>Teaching an agent to see clearly<br>through murky water.</h1>
+      <p class="hero-sub">A DDPG policy learns, frame by frame, which corrections pull color and contrast back out of light-scattered, color-cast underwater photos — trained and scored on the UIEB benchmark.</p>
+      <div class="hero-stats">
+        <div><strong>DDPG</strong><span>this build's agent</span></div>
+        <div><strong>UIEB</strong><span>benchmark dataset</span></div>
+        <div><strong>4</strong><span>metrics tracked</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="demo" class="section demo">
+    <div class="wrap">
+      <h2>Try a restoration</h2>
+      <p class="section-lede">Drop in an underwater photo. The agent applies its learned correction policy and the scores below update to match.</p>
+
+      <div class="demo-panel">
+        <div class="upload-zone" id="dropZone">
+          <input type="file" id="fileInput" accept="image/*" hidden>
+          <div id="uploadPrompt" class="upload-prompt">
+            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M12 3v12m0-12l-4 4m4-4l4 4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>
+            <p>Drag an image here, or <button type="button" id="browseBtn">browse</button></p>
+            <p class="hint">JPG or PNG. Nothing leaves your browser.</p>
+          </div>
+          <div id="compareView" class="compare-view" hidden>
+            <div class="compare-col">
+              <span class="compare-label">Input</span>
+              <img id="imgBefore" alt="Original underwater photo">
+            </div>
+            <div class="compare-col">
+              <span class="compare-label">DDPG output</span>
+              <canvas id="imgAfter"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <div class="metrics-panel">
+          <p class="metrics-title">Restoration scores</p>
+          <div class="metric-row" data-metric="psnr">
+            <span class="metric-name">PSNR</span>
+            <span class="metric-bar"><span class="metric-fill"></span></span>
+            <span class="metric-val">—</span>
+          </div>
+          <div class="metric-row" data-metric="ssim">
+            <span class="metric-name">SSIM</span>
+            <span class="metric-bar"><span class="metric-fill"></span></span>
+            <span class="metric-val">—</span>
+          </div>
+          <div class="metric-row" data-metric="uiqm">
+            <span class="metric-name">UIQM</span>
+            <span class="metric-bar"><span class="metric-fill"></span></span>
+            <span class="metric-val">—</span>
+          </div>
+          <div class="metric-row" data-metric="uciqe">
+            <span class="metric-name">UCIQE</span>
+            <span class="metric-bar"><span class="metric-fill"></span></span>
+            <span class="metric-val">—</span>
+          </div>
+          <p class="metrics-note">Illustrative scores from a lightweight in-browser color-correction pass standing in for the trained DDPG policy — wire up <code>script.js → restoreWithModel()</code> to your real inference endpoint.</p>
+          <button id="resetBtn" class="reset-btn" hidden>Try another image</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="method" class="section method">
+    <div class="wrap">
+      <h2>How the agent works</h2>
+      <div class="method-grid">
+        <div class="method-card">
+          <span class="method-index">State</span>
+          <p>Each degraded UIEB frame — its color histogram, contrast and haze estimate — becomes the observation the policy reads.</p>
+        </div>
+        <div class="method-card">
+          <span class="method-index">Action</span>
+          <p>DDPG outputs a continuous correction vector: white-balance shift, contrast stretch, and dehazing strength.</p>
+        </div>
+        <div class="method-card">
+          <span class="method-index">Reward</span>
+          <p>The corrected frame is scored against its reference on PSNR, SSIM, UIQM and UCIQE; the blended score is the reward signal.</p>
+        </div>
+        <div class="method-card">
+          <span class="method-index">Policy</span>
+          <p>An actor-critic pair refines the correction policy over training episodes until scores plateau on the held-out split.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="metrics" class="section metrics-explainer">
+    <div class="wrap">
+      <h2>Why these four metrics</h2>
+      <p class="section-lede">Same dataset, same metrics, same problem statement across the team — only the restoration algorithm changes per person.</p>
+      <dl class="metric-defs">
+        <div><dt>PSNR</dt><dd>Pixel-level fidelity to the reference image, in decibels — higher means less distortion.</dd></div>
+        <div><dt>SSIM</dt><dd>Structural similarity to the reference — how well edges, texture and luminance are preserved.</dd></div>
+        <div><dt>UIQM</dt><dd>Underwater Image Quality Measure — a no-reference score combining colorfulness, sharpness and contrast.</dd></div>
+        <div><dt>UCIQE</dt><dd>Underwater Color Image Quality Evaluation — weights chroma, saturation and luminance variance for underwater scenes.</dd></div>
+      </dl>
+    </div>
+  </section>
+
+  <section id="team" class="section team">
+    <div class="wrap">
+      <h2>Team split</h2>
+      <p class="section-lede">Shared problem statement, dataset and metrics — four different solutions.</p>
+      <div class="team-grid">
+        <div class="team-card active">
+          <span class="team-tag">This build</span>
+          <h3>DDPG</h3>
+          <p>Deep Deterministic Policy Gradient — continuous-action actor-critic restoration policy.</p>
+        </div>
+        <div class="team-card">
+          <span class="team-tag">Teammate</span>
+          <h3>Algorithm 2</h3>
+          <p>Slot in a teammate's chosen method here.</p>
+        </div>
+        <div class="team-card">
+          <span class="team-tag">Teammate</span>
+          <h3>Algorithm 3</h3>
+          <p>Slot in a teammate's chosen method here.</p>
+        </div>
+        <div class="team-card">
+          <span class="team-tag">Teammate</span>
+          <h3>Algorithm 4</h3>
+          <p>Slot in a teammate's chosen method here.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">Reinforcement Learning-Based Underwater Degradation Image Restoration · UIEB benchmark</div>
+</footer>
+
+<script src="script.js"></script>
+</body>
+</html>
