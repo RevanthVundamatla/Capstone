@@ -14,13 +14,43 @@ from __future__ import annotations
 
 import argparse
 import os
+import time
 
 import cv2
 import numpy as np
+import torch
 
 from ddpg.agent import DDPGAgent
 from enhancement.environment import UnderwaterEnhanceEnv
 from metrics.metrics import all_metrics
+
+
+# ============================================================
+# HELPERS
+# ============================================================
+
+def _to_python(obj):
+    """
+    Recursively convert NumPy / torch values to plain Python types
+    so the result is JSON serializable (needed by Flask's jsonify).
+    """
+
+    if isinstance(obj, dict):
+        return {str(k): _to_python(v) for k, v in obj.items()}
+
+    if isinstance(obj, (list, tuple)):
+        return [_to_python(v) for v in obj]
+
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+
+    if isinstance(obj, np.generic):
+        return obj.item()
+
+    if isinstance(obj, torch.Tensor):
+        return obj.detach().cpu().tolist()
+
+    return obj
 
 
 # ============================================================
@@ -33,28 +63,15 @@ def load_image(path: str) -> np.ndarray:
     """
 
     if not os.path.exists(path):
-        raise FileNotFoundError(
-            f"Image not found: {path}"
-        )
+        raise FileNotFoundError(f"Image not found: {path}")
 
-    image = cv2.imread(
-        path,
-        cv2.IMREAD_COLOR
-    )
+    image = cv2.imread(path, cv2.IMREAD_COLOR)
 
     if image is None:
-        raise ValueError(
-            f"Could not read image: {path}"
-        )
+        raise ValueError(f"Could not read image: {path}")
 
-    image = cv2.cvtColor(
-        image,
-        cv2.COLOR_BGR2RGB
-    )
-
-    image = image.astype(
-        np.float32
-    ) / 255.0
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    image = image.astype(np.float32) / 255.0
 
     return image
 
@@ -63,48 +80,24 @@ def load_image(path: str) -> np.ndarray:
 # IMAGE SAVING
 # ============================================================
 
-def save_image(
-    path: str,
-    image: np.ndarray
-):
+def save_image(path: str, image: np.ndarray):
     """
     Save RGB float32 image in [0, 1].
     """
 
-    image = np.clip(
-        image,
-        0.0,
-        1.0
-    )
-
-    image = (
-        image * 255.0
-    ).astype(
-        np.uint8
-    )
-
-    image = cv2.cvtColor(
-        image,
-        cv2.COLOR_RGB2BGR
-    )
+    image = np.clip(image, 0.0, 1.0)
+    image = (image * 255.0).astype(np.uint8)
+    image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
 
     output_dir = os.path.dirname(path)
 
     if output_dir:
-        os.makedirs(
-            output_dir,
-            exist_ok=True
-        )
+        os.makedirs(output_dir, exist_ok=True)
 
-    success = cv2.imwrite(
-        path,
-        image
-    )
+    success = cv2.imwrite(path, image)
 
     if not success:
-        raise IOError(
-            f"Could not save image: {path}"
-        )
+        raise IOError(f"Could not save image: {path}")
 
 
 # ============================================================
@@ -115,7 +108,7 @@ def restore_image(
     agent: DDPGAgent,
     image: np.ndarray,
     max_steps: int = 3,
-    reference: np.ndarray | None = None
+    reference: np.ndarray | None = None,
 ):
     """
     Run the trained DDPG agent.
@@ -132,49 +125,66 @@ def restore_image(
         actions_taken
     """
 
-    env = UnderwaterEnhanceEnv(
-        max_steps=max_steps
-    )
+    t_total = time.time()
 
-    state = env.reset(
-        image,
-        reference
-    )
+    env = UnderwaterEnhanceEnv(max_steps=max_steps)
+
+    state = env.reset(image, reference)
 
     actions_taken = []
 
+    t_loop = time.time()
+
     for step in range(max_steps):
 
-        action = agent.select_action(
-            state,
-            noise_std=0.0
-        )
+        t_step = time.time()
 
-        state, reward, done, info = env.step(
-            action
-        )
+        with torch.no_grad():
+            action = agent.select_action(state, noise_std=0.0)
+
+        state, reward, done, info = env.step(action)
 
         actions_taken.append({
             "step": step + 1,
-            "action": action.tolist(),
+            "action": _to_python(action),
             "reward": float(reward),
-            "metrics": info
+            "metrics": _to_python(info),
         })
+
+        print(
+            f"[inference] step {step + 1}/{max_steps} "
+            f"took {time.time() - t_step:.2f}s",
+            flush=True,
+        )
 
         if done:
             break
 
+    print(
+        f"[inference] environment loop took {time.time() - t_loop:.2f}s",
+        flush=True,
+    )
+
     restored = env.current.copy()
 
-    metrics = all_metrics(
-        restored,
-        reference
+    t_metrics = time.time()
+
+    metrics = all_metrics(restored, reference)
+
+    print(
+        f"[inference] all_metrics took {time.time() - t_metrics:.2f}s",
+        flush=True,
+    )
+
+    print(
+        f"[inference] restore_image total {time.time() - t_total:.2f}s",
+        flush=True,
     )
 
     return (
         restored,
         metrics,
-        actions_taken
+        actions_taken,
     )
 
 
@@ -185,64 +195,45 @@ def restore_image(
 def parse_arguments():
 
     parser = argparse.ArgumentParser(
-        description=(
-            "DDPG Underwater Image Restoration"
-        )
+        description="DDPG Underwater Image Restoration"
     )
 
     parser.add_argument(
         "--input",
         required=True,
-        help=(
-            "Path to degraded underwater image"
-        )
+        help="Path to degraded underwater image",
     )
 
     parser.add_argument(
         "--reference",
         default=None,
-        help=(
-            "Optional path to reference image"
-        )
+        help="Optional path to reference image",
     )
 
     parser.add_argument(
         "--checkpoint",
-        default=(
-            "checkpoints/"
-            "best_ddpg_actor_critic.pt"
-        ),
-        help=(
-            "Path to trained DDPG checkpoint"
-        )
+        default="checkpoints/best_ddpg_actor_critic.pt",
+        help="Path to trained DDPG checkpoint",
     )
 
     parser.add_argument(
         "--output",
-        default=(
-            "outputs/restored.jpg"
-        ),
-        help=(
-            "Path for restored output image"
-        )
+        default="outputs/restored.jpg",
+        help="Path for restored output image",
     )
 
     parser.add_argument(
         "--steps",
         type=int,
         default=3,
-        help=(
-            "Number of DDPG enhancement passes"
-        )
+        help="Number of DDPG enhancement passes",
     )
 
     parser.add_argument(
         "--device",
         default="cpu",
         choices=["cpu", "cuda"],
-        help=(
-            "Inference device"
-        )
+        help="Inference device",
     )
 
     return parser.parse_args()
@@ -268,29 +259,17 @@ def main():
     print()
     print("[1/5] Loading trained model...")
 
-    if not os.path.exists(
-        args.checkpoint
-    ):
+    if not os.path.exists(args.checkpoint):
         raise FileNotFoundError(
-            "Checkpoint not found:\n"
-            f"{args.checkpoint}"
+            f"Checkpoint not found:\n{args.checkpoint}"
         )
 
-    print(
-        f"Checkpoint: {args.checkpoint}"
-    )
+    print(f"Checkpoint: {args.checkpoint}")
 
-    agent = DDPGAgent(
-        device=args.device
-    )
+    agent = DDPGAgent(device=args.device)
+    agent.load(args.checkpoint)
 
-    agent.load(
-        args.checkpoint
-    )
-
-    print(
-        "Model loaded successfully."
-    )
+    print("Model loaded successfully.")
 
     # --------------------------------------------------------
     # Load input image
@@ -298,20 +277,11 @@ def main():
 
     print()
     print("[2/5] Loading input image...")
+    print(f"Input: {args.input}")
 
-    print(
-        f"Input: {args.input}"
-    )
+    image = load_image(args.input)
 
-    image = load_image(
-        args.input
-    )
-
-    print(
-        f"Image size: "
-        f"{image.shape[1]} x "
-        f"{image.shape[0]}"
-    )
+    print(f"Image size: {image.shape[1]} x {image.shape[0]}")
 
     # --------------------------------------------------------
     # Load reference image
@@ -322,81 +292,51 @@ def main():
     if args.reference:
 
         print()
-        print(
-            "[3/5] Loading reference image..."
-        )
+        print("[3/5] Loading reference image...")
+        print(f"Reference: {args.reference}")
 
-        print(
-            f"Reference: {args.reference}"
-        )
-
-        reference = load_image(
-            args.reference
-        )
+        reference = load_image(args.reference)
 
         if image.shape != reference.shape:
-
             raise ValueError(
-                "Input and reference image "
-                "dimensions do not match.\n"
+                "Input and reference image dimensions do not match.\n"
                 f"Input: {image.shape}\n"
                 f"Reference: {reference.shape}"
             )
 
-        print(
-            "Reference loaded successfully."
-        )
+        print("Reference loaded successfully.")
 
     else:
 
         print()
-        print(
-            "[3/5] No reference image supplied."
-        )
-
-        print(
-            "Only no-reference metrics "
-            "will be calculated."
-        )
+        print("[3/5] No reference image supplied.")
+        print("Only no-reference metrics will be calculated.")
 
     # --------------------------------------------------------
     # Run DDPG
     # --------------------------------------------------------
 
     print()
-    print(
-        "[4/5] Running DDPG restoration..."
-    )
-
-    print(
-        f"Enhancement passes: {args.steps}"
-    )
+    print("[4/5] Running DDPG restoration...")
+    print(f"Enhancement passes: {args.steps}")
 
     restored, metrics, actions = restore_image(
         agent=agent,
         image=image,
         max_steps=args.steps,
-        reference=reference
+        reference=reference,
     )
 
-    print(
-        "Restoration completed."
-    )
+    print("Restoration completed.")
 
     # --------------------------------------------------------
     # Save output
     # --------------------------------------------------------
 
-    save_image(
-        args.output,
-        restored
-    )
+    save_image(args.output, restored)
 
     print()
-    print(
-        f"Restored image saved to:\n"
-        f"{args.output}"
-    )
+    print(f"Restored image saved to:\n{args.output}")
 
     # --------------------------------------------------------
     # Display actions
@@ -409,35 +349,17 @@ def main():
 
     for item in actions:
 
-        print(
-            f"\nStep {item['step']}"
-        )
-
-        print(
-            f"Reward: "
-            f"{item['reward']:.6f}"
-        )
-
-        print(
-            "Action:"
-        )
-
-        print(
-            np.round(
-                item["action"],
-                4
-            )
-        )
+        print(f"\nStep {item['step']}")
+        print(f"Reward: {item['reward']:.6f}")
+        print("Action:")
+        print(np.round(item["action"], 4))
 
     # --------------------------------------------------------
     # Display metrics
     # --------------------------------------------------------
 
     print()
-    print(
-        "[5/5] Evaluation"
-    )
-
+    print("[5/5] Evaluation")
     print()
     print("-" * 70)
     print("RESTORATION METRICS")
@@ -445,9 +367,7 @@ def main():
 
     if metrics is None:
 
-        print(
-            "No metrics available."
-        )
+        print("No metrics available.")
 
     else:
 
@@ -458,29 +378,17 @@ def main():
 
             if isinstance(
                 value,
-                (int, float, np.integer, np.floating)
+                (int, float, np.integer, np.floating),
             ):
 
                 if name.lower() == "psnr":
-
-                    print(
-                        f"{name.upper():<8}: "
-                        f"{float(value):.4f} dB"
-                    )
-
+                    print(f"{name.upper():<8}: {float(value):.4f} dB")
                 else:
-
-                    print(
-                        f"{name.upper():<8}: "
-                        f"{float(value):.4f}"
-                    )
+                    print(f"{name.upper():<8}: {float(value):.4f}")
 
             else:
 
-                print(
-                    f"{name.upper():<8}: "
-                    f"{value}"
-                )
+                print(f"{name.upper():<8}: {value}")
 
     # --------------------------------------------------------
     # Final message
