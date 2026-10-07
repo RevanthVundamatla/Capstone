@@ -9,9 +9,7 @@ The reward is based on improvement in:
     - SSIM  : full-reference structural similarity
     - UIQM  : no-reference underwater image quality
     - UCIQE : no-reference underwater image quality
-
-When a reference image is available, PSNR and SSIM receive the
-largest weights.
+    - cast  : color cast (lower is better)
 """
 
 from __future__ import annotations
@@ -28,15 +26,22 @@ from metrics.metrics import psnr, ssim, uiqm, uciqe
 # ---------------------------------------------------------
 
 REWARD_WEIGHTS = {
-    "psnr": 0.40,
-    "ssim": 0.35,
-    "uiqm": 0.15,
-    "uciqe": 0.10,
+    "psnr": 0.30,
+    "ssim": 0.25,
+    "uiqm": 0.20,
+    "uciqe": 0.15,
+    "cast": 0.30,
 }
 
 PSNR_NORM = 30.0
 UIQM_NORM = 4.0
-UCIQE_NORM = 0.7
+
+# The uciqe() in metrics/metrics.py returns values around 3-4
+# (not 0-1), so the old norm of 0.7 clipped every value to 1.0
+# and the UCIQE reward was always zero.
+# IMPORTANT: print uciqe() on ~20 UIEB images and set this to a
+# value slightly above the largest typical result.
+UCIQE_NORM = 6.0
 
 
 def _clip01(value: float) -> float:
@@ -56,6 +61,19 @@ def _normalized_uciqe(value: float) -> float:
     return _clip01(value / UCIQE_NORM)
 
 
+def color_cast(img: np.ndarray) -> float:
+    """
+    Simple gray-world color-cast measure.
+
+    Spread of the mean R, G, B values. 0 means perfectly balanced
+    channels; larger values mean a stronger color cast.
+    """
+
+    channel_means = np.asarray(img, dtype=np.float32).reshape(-1, 3).mean(axis=0)
+
+    return float(np.std(channel_means))
+
+
 def compute_metrics(
     restored: np.ndarray,
     reference: np.ndarray | None = None,
@@ -64,6 +82,7 @@ def compute_metrics(
     info = {
         "uiqm": float(uiqm(restored)),
         "uciqe": float(uciqe(restored)),
+        "cast": color_cast(restored),
     }
 
     if reference is not None:
@@ -94,11 +113,8 @@ def compute_reward(
         current_ssim = _clip01(current_metrics["ssim"])
         previous_ssim = _clip01(previous_metrics["ssim"])
 
-        psnr_improvement = current_psnr - previous_psnr
-        ssim_improvement = current_ssim - previous_ssim
-
-        reward += REWARD_WEIGHTS["psnr"] * psnr_improvement
-        reward += REWARD_WEIGHTS["ssim"] * ssim_improvement
+        reward += REWARD_WEIGHTS["psnr"] * (current_psnr - previous_psnr)
+        reward += REWARD_WEIGHTS["ssim"] * (current_ssim - previous_ssim)
 
     # -----------------------------------------------------
     # No-reference reward
@@ -110,11 +126,16 @@ def compute_reward(
     current_uciqe = _normalized_uciqe(current_metrics["uciqe"])
     previous_uciqe = _normalized_uciqe(previous_metrics["uciqe"])
 
-    uiqm_improvement = current_uiqm - previous_uiqm
-    uciqe_improvement = current_uciqe - previous_uciqe
+    reward += REWARD_WEIGHTS["uiqm"] * (current_uiqm - previous_uiqm)
+    reward += REWARD_WEIGHTS["uciqe"] * (current_uciqe - previous_uciqe)
 
-    reward += REWARD_WEIGHTS["uiqm"] * uiqm_improvement
-    reward += REWARD_WEIGHTS["uciqe"] * uciqe_improvement
+    # -----------------------------------------------------
+    # Color-cast reward (positive when the cast shrinks)
+    # -----------------------------------------------------
+
+    cast_improvement = previous_metrics["cast"] - current_metrics["cast"]
+
+    reward += REWARD_WEIGHTS["cast"] * cast_improvement
 
     # -----------------------------------------------------
     # Small action penalty
