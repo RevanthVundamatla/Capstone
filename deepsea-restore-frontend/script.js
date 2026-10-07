@@ -10,8 +10,54 @@ const resetBtn = document.getElementById('resetBtn');
 // Render backend URL
 const API_URL = "https://capstone-deepsea-restore-backend.onrender.com";
 
-// Download button
+// Max time to wait for the backend (ms). Render free tier can be slow.
+const REQUEST_TIMEOUT_MS = 5 * 60 * 1000;
+
+// Download button + status message
 let downloadBtn = null;
+let statusEl = null;
+let isProcessing = false;
+
+
+/* ------------------------------------------------------------------ */
+/* Wake the backend as soon as the page loads (Render free tier sleeps) */
+/* ------------------------------------------------------------------ */
+
+(function wakeBackend() {
+  fetch(`${API_URL}/api/health`)
+    .then((r) => r.json())
+    .then((data) => console.log('Backend health:', data))
+    .catch((err) => console.warn('Backend wake-up ping failed:', err));
+})();
+
+
+/* ------------------------------------------------------------------ */
+/* Status message helpers                                              */
+/* ------------------------------------------------------------------ */
+
+function showStatus(message) {
+  if (!statusEl) {
+    statusEl = document.createElement('div');
+    statusEl.style.margin = '12px 0';
+    statusEl.style.fontSize = '14px';
+    statusEl.style.opacity = '0.85';
+    compareView.parentNode.insertBefore(statusEl, compareView.nextSibling);
+  }
+  statusEl.textContent = message;
+  statusEl.hidden = false;
+}
+
+function hideStatus() {
+  if (statusEl) {
+    statusEl.hidden = true;
+    statusEl.textContent = '';
+  }
+}
+
+
+/* ------------------------------------------------------------------ */
+/* UI events                                                           */
+/* ------------------------------------------------------------------ */
 
 browseBtn.addEventListener('click', (e) => {
   e.stopPropagation();
@@ -63,7 +109,16 @@ fileInput.addEventListener('change', (e) => {
 resetBtn.addEventListener('click', resetDemo);
 
 
+/* ------------------------------------------------------------------ */
+/* File handling                                                       */
+/* ------------------------------------------------------------------ */
+
 function handleFile(file) {
+
+  if (isProcessing) {
+    alert('Please wait until the current image finishes processing.');
+    return;
+  }
 
   if (!file.type.startsWith('image/')) {
     alert('Please select a JPG or PNG image.');
@@ -96,6 +151,7 @@ function resetDemo() {
   fileInput.value = '';
 
   clearMetrics();
+  hideStatus();
 
   canvasAfter.width = 0;
   canvasAfter.height = 0;
@@ -119,7 +175,38 @@ function clearMetrics() {
 }
 
 
+/* ------------------------------------------------------------------ */
+/* Backend request                                                     */
+/* ------------------------------------------------------------------ */
+
+async function postImage(file) {
+
+  const formData = new FormData();
+
+  // Backend expects the uploaded image as "image"
+  formData.append('image', file, file.name);
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  try {
+    return await fetch(
+      `${API_URL}/api/restore`,
+      {
+        method: 'POST',
+        body: formData,
+        signal: controller.signal
+      }
+    );
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+
 async function restoreWithModel(file, targetCanvas) {
+
+  isProcessing = true;
 
   try {
 
@@ -127,43 +214,53 @@ async function restoreWithModel(file, targetCanvas) {
       element.textContent = '...';
     });
 
+    showStatus(
+      'Restoring image... the server may need up to a minute to wake up and process.'
+    );
+
     console.log('Sending image to DeepSea Restore backend...');
-
-    const formData = new FormData();
-
-    // Backend expects the uploaded image as "image"
-    formData.append('image', file, file.name);
-
     console.log('API URL:', API_URL);
     console.log('Sending file:', file.name);
     console.log('File type:', file.type);
     console.log('File size:', file.size);
 
-    const response = await fetch(
-      `${API_URL}/api/restore`,
-      {
-        method: 'POST',
-        body: formData
+    let response;
+
+    try {
+      response = await postImage(file);
+    } catch (firstError) {
+
+      // Cold start / dropped connection: retry once
+      if (firstError.name === 'AbortError') {
+        throw firstError;
       }
-    );
+
+      console.warn('First request failed, retrying once...', firstError);
+
+      showStatus('Server is waking up, retrying...');
+
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+
+      response = await postImage(file);
+    }
 
     console.log('Backend HTTP status:', response.status);
 
     const responseText = await response.text();
-
-    console.log('Raw backend response:', responseText);
 
     let result;
 
     try {
       result = JSON.parse(responseText);
     } catch (jsonError) {
+      console.error('Raw backend response:', responseText);
+
       throw new Error(
         `Backend returned invalid JSON. HTTP ${response.status}`
       );
     }
 
-    console.log('Backend response:', result);
+    console.log('Backend response received.');
 
     if (!response.ok) {
 
@@ -206,6 +303,8 @@ async function restoreWithModel(file, targetCanvas) {
       result.image
     );
 
+    hideStatus();
+
     console.log(
       'Image restoration completed successfully.'
     );
@@ -218,15 +317,36 @@ async function restoreWithModel(file, targetCanvas) {
     );
 
     clearMetrics();
+    hideStatus();
+
+    let message = error.message;
+
+    if (error.name === 'AbortError') {
+      message =
+        'The request took too long and was cancelled. ' +
+        'Try a smaller image or try again in a minute.';
+    } else if (error instanceof TypeError) {
+      message =
+        'Could not reach the backend. It may be starting up or ' +
+        'overloaded. Please wait a minute and try again.';
+    }
 
     alert(
       'Image restoration failed.\n\n' +
-      error.message +
+      message +
       '\n\nOpen the browser Console (F12) for more details.'
     );
+
+  } finally {
+
+    isProcessing = false;
   }
 }
 
+
+/* ------------------------------------------------------------------ */
+/* Display restored image                                              */
+/* ------------------------------------------------------------------ */
 
 function displayRestoredImage(
   imageData,
@@ -305,6 +425,10 @@ function displayRestoredImage(
 }
 
 
+/* ------------------------------------------------------------------ */
+/* Download button                                                     */
+/* ------------------------------------------------------------------ */
+
 function createDownloadButton(imageData) {
 
   if (downloadBtn) {
@@ -339,6 +463,10 @@ function createDownloadButton(imageData) {
   );
 }
 
+
+/* ------------------------------------------------------------------ */
+/* Metrics display                                                     */
+/* ------------------------------------------------------------------ */
 
 function updateMetrics(metrics) {
 
@@ -409,6 +537,9 @@ function updateMetrics(metrics) {
 
       valueElement.textContent =
         'N/A';
+
+      fillElement.style.width =
+        '0%';
 
       return;
     }
