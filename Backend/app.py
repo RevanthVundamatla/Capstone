@@ -86,17 +86,11 @@ MAX_IMAGE_DIM = 512
 
 
 # ---------------------------------------------------------------------------
-# Flask application
+# Flask application & CORS Configuration
 # ---------------------------------------------------------------------------
 
 app = Flask(__name__)
 
-# Supports either:
-#   ALLOWED_ORIGINS="*"
-#
-# or:
-#   ALLOWED_ORIGINS="https://example.vercel.app,https://www.example.com"
-#
 if ALLOWED_ORIGINS.strip() == "*":
     cors_origins = "*"
 else:
@@ -106,14 +100,30 @@ else:
         if origin.strip()
     ]
 
+# Configure CORS fully to support preflight OPTIONS requests across all API routes
 CORS(
     app,
     resources={
         r"/api/*": {
             "origins": cors_origins,
+            "methods": ["GET", "POST", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization", "X-Requested-With"],
+            "supports_credentials": True
         }
     },
 )
+
+# Guarantee header presence on responses
+@app.after_request
+def add_cors_headers(response):
+    origin = request.headers.get("Origin")
+    if origin:
+        if cors_origins == "*" or (isinstance(cors_origins, list) and origin in cors_origins):
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+            response.headers["Access-Control-Allow-Headers"] = "Content-Type,Authorization,X-Requested-With"
+            response.headers["Access-Control-Allow-Methods"] = "GET,POST,OPTIONS"
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -277,13 +287,13 @@ def restore():
     Supports:
 
     1. Multipart:
-       POST /api/restore
-       field name = image
+        POST /api/restore
+        field name = image
 
     2. JSON:
-       {
-           "image": "data:image/png;base64,..."
-       }
+        {
+            "image": "data:image/png;base64,..."
+        }
     """
 
     # ---------------------------------------------------------------
