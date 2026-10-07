@@ -82,7 +82,7 @@ except ValueError:
 
 ALLOWED_ORIGINS = os.environ.get("ALLOWED_ORIGINS", "*")
 
-MAX_IMAGE_DIM = 1024
+MAX_IMAGE_DIM = 512
 
 
 # ---------------------------------------------------------------------------
