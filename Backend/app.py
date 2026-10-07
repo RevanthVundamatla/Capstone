@@ -21,41 +21,28 @@ Local:
     python app.py
 
 Render / production:
-    gunicorn app:app
+    gunicorn app:app --workers 1 --threads 2 --timeout 300 --bind 0.0.0.0:$PORT
 
 Environment variables
 ---------------------
-CHECKPOINT
-    Path to the trained checkpoint.
-    Default:
-        checkpoints/ddpg_actor_critic.pt
-
-DEVICE
-    cpu / cuda
-    Default:
-        cpu
-
-MAX_STEPS
-    Maximum restoration steps.
-    Default:
-        3
-
-ALLOWED_ORIGINS
-    Comma-separated frontend origins, or "*" for development.
-    Example:
-        https://your-frontend.vercel.app
-
-PORT
-    Provided automatically by Render.
+CHECKPOINT       Path to trained checkpoint (default: checkpoints/ddpg_actor_critic.pt)
+DEVICE           cpu / cuda (default: cpu)
+MAX_STEPS        Maximum restoration steps (default: 3)
+MAX_IMAGE_DIM    Longest image side in pixels before resizing (default: 256)
+ALLOWED_ORIGINS  Comma-separated frontend origins, or "*" (default: "*")
+                 Example: https://capstone-hazel-six.vercel.app
+PORT             Provided automatically by Render.
 """
 
 import base64
 import binascii
 import io
 import os
+import time
 
 import cv2
 import numpy as np
+import torch
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from PIL import Image
@@ -67,6 +54,9 @@ from inference import restore_image
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
+
+# Keep CPU/memory usage low on small Render instances
+torch.set_num_threads(1)
 
 CHECKPOINT_PATH = os.environ.get(
     "CHECKPOINT",
@@ -80,13 +70,16 @@ try:
 except ValueError:
     MAX_STEPS = 3
 
-ALLOWED_ORIGINS = os.environ.get("ALLOWED_ORIGINS", "*")
+try:
+    MAX_IMAGE_DIM = int(os.environ.get("MAX_IMAGE_DIM", "256"))
+except ValueError:
+    MAX_IMAGE_DIM = 256
 
-MAX_IMAGE_DIM = 512
+ALLOWED_ORIGINS = os.environ.get("ALLOWED_ORIGINS", "*")
 
 
 # ---------------------------------------------------------------------------
-# Flask application & CORS Configuration
+# Flask application & CORS
 # ---------------------------------------------------------------------------
 
 app = Flask(__name__)
@@ -95,41 +88,21 @@ if ALLOWED_ORIGINS.strip() == "*":
     cors_origins = "*"
 else:
     cors_origins = [
-        origin.strip()
+        origin.strip().rstrip("/")
         for origin in ALLOWED_ORIGINS.split(",")
         if origin.strip()
     ]
 
-# Configure CORS fully to support preflight OPTIONS requests across all API routes
 CORS(
     app,
     resources={
         r"/api/*": {
-            "origins": "*",
+            "origins": cors_origins,
             "methods": ["GET", "POST", "OPTIONS"],
             "allow_headers": ["Content-Type", "Authorization", "X-Requested-With"],
-            "supports_credentials": True
         }
     },
 )
-
-# Guarantee header presence and dynamically allow Vercel previews on responses
-@app.after_request
-def add_cors_headers(response):
-    origin = request.headers.get("Origin")
-    if origin:
-        if (
-            cors_origins == "*" 
-            or origin.endswith(".vercel.app") 
-            or "localhost" in origin 
-            or "127.0.0.1" in origin 
-            or (isinstance(cors_origins, list) and origin in cors_origins)
-        ):
-            response.headers["Access-Control-Allow-Origin"] = origin
-            response.headers["Access-Control-Allow-Credentials"] = "true"
-            response.headers["Access-Control-Allow-Headers"] = "Content-Type,Authorization,X-Requested-With"
-            response.headers["Access-Control-Allow-Methods"] = "GET,POST,OPTIONS"
-    return response
 
 
 # ---------------------------------------------------------------------------
@@ -198,29 +171,19 @@ def decode_image(file_storage=None, data_url=None) -> np.ndarray:
             raise ValueError("Image data URL must contain base64 data.")
 
         try:
-            image_bytes = base64.b64decode(
-                encoded,
-                validate=True,
-            )
+            image_bytes = base64.b64decode(encoded, validate=True)
         except (binascii.Error, ValueError) as exc:
             raise ValueError("Invalid base64 image data.") from exc
 
         if not image_bytes:
             raise ValueError("Image data is empty.")
 
-        pil_img = Image.open(
-            io.BytesIO(image_bytes)
-        ).convert("RGB")
+        pil_img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
 
     else:
         raise ValueError("No image was provided.")
 
-    arr = np.array(
-        pil_img,
-        dtype=np.float32,
-    ) / 255.0
-
-    return arr
+    return np.array(pil_img, dtype=np.float32) / 255.0
 
 
 def encode_image(arr: np.ndarray) -> str:
@@ -228,24 +191,14 @@ def encode_image(arr: np.ndarray) -> str:
     Encode an RGB NumPy array as a PNG data URL.
     """
 
-    arr8 = np.clip(
-        arr * 255.0,
-        0,
-        255,
-    ).astype(np.uint8)
+    arr8 = np.clip(arr * 255.0, 0, 255).astype(np.uint8)
 
     pil_img = Image.fromarray(arr8)
 
     buf = io.BytesIO()
+    pil_img.save(buf, format="PNG")
 
-    pil_img.save(
-        buf,
-        format="PNG",
-    )
-
-    b64 = base64.b64encode(
-        buf.getvalue()
-    ).decode("ascii")
+    b64 = base64.b64encode(buf.getvalue()).decode("ascii")
 
     return f"data:image/png;base64,{b64}"
 
@@ -282,6 +235,7 @@ def health():
         checkpoint_path=CHECKPOINT_PATH,
         device=DEVICE,
         max_steps=MAX_STEPS,
+        max_image_dim=MAX_IMAGE_DIM,
     )
 
 
@@ -302,6 +256,8 @@ def restore():
         }
     """
 
+    t_start = time.time()
+
     # ---------------------------------------------------------------
     # Decode image
     # ---------------------------------------------------------------
@@ -309,24 +265,17 @@ def restore():
     try:
 
         if "image" in request.files:
-            raw = decode_image(
-                file_storage=request.files["image"]
-            )
+            raw = decode_image(file_storage=request.files["image"])
 
         elif request.is_json:
             data = request.get_json(silent=True)
 
             if not data or "image" not in data:
                 return jsonify(
-                    error=(
-                        "JSON body must contain an "
-                        "'image' field."
-                    )
+                    error="JSON body must contain an 'image' field."
                 ), 400
 
-            raw = decode_image(
-                data_url=data["image"]
-            )
+            raw = decode_image(data_url=data["image"])
 
         else:
             return jsonify(
@@ -337,9 +286,7 @@ def restore():
             ), 400
 
     except Exception as exc:
-        return jsonify(
-            error=f"Could not decode image: {exc}"
-        ), 400
+        return jsonify(error=f"Could not decode image: {exc}"), 400
 
     # ---------------------------------------------------------------
     # Resize large images
@@ -351,20 +298,10 @@ def restore():
 
         if max(height, width) > MAX_IMAGE_DIM:
 
-            scale = MAX_IMAGE_DIM / max(
-                height,
-                width,
-            )
+            scale = MAX_IMAGE_DIM / max(height, width)
 
-            new_width = max(
-                1,
-                int(width * scale),
-            )
-
-            new_height = max(
-                1,
-                int(height * scale),
-            )
+            new_width = max(1, int(width * scale))
+            new_height = max(1, int(height * scale))
 
             raw = cv2.resize(
                 raw,
@@ -377,27 +314,37 @@ def restore():
             error=f"Could not process image dimensions: {exc}"
         ), 400
 
+    print(
+        f"[restore] decoded + resized to {raw.shape[1]}x{raw.shape[0]} "
+        f"in {time.time() - t_start:.2f}s",
+        flush=True,
+    )
+
     # ---------------------------------------------------------------
     # Run restoration
     # ---------------------------------------------------------------
 
     try:
 
-        restored, metrics, actions = restore_image(
-            agent,
-            raw,
-            max_steps=MAX_STEPS,
+        t_infer = time.time()
+
+        with torch.no_grad():
+            restored, metrics, actions = restore_image(
+                agent,
+                raw,
+                max_steps=MAX_STEPS,
+            )
+
+        print(
+            f"[restore] restore_image took {time.time() - t_infer:.2f}s",
+            flush=True,
         )
 
     except Exception as exc:
 
-        app.logger.exception(
-            "Image restoration failed"
-        )
+        app.logger.exception("Image restoration failed")
 
-        return jsonify(
-            error=f"Image restoration failed: {exc}"
-        ), 500
+        return jsonify(error=f"Image restoration failed: {exc}"), 500
 
     # ---------------------------------------------------------------
     # Encode response
@@ -405,24 +352,24 @@ def restore():
 
     try:
 
-        encoded_image = encode_image(
-            restored
-        )
+        encoded_image = encode_image(restored)
 
         clean_metrics = {
             key: round(float(value), 4)
             for key, value in metrics.items()
+            if value is not None
         }
 
     except Exception as exc:
 
-        app.logger.exception(
-            "Could not encode restored image"
-        )
+        app.logger.exception("Could not encode restored image")
 
-        return jsonify(
-            error=f"Could not encode restored image: {exc}"
-        ), 500
+        return jsonify(error=f"Could not encode restored image: {exc}"), 500
+
+    print(
+        f"[restore] total request time {time.time() - t_start:.2f}s",
+        flush=True,
+    )
 
     return jsonify(
         image=encoded_image,
@@ -438,23 +385,17 @@ def restore():
 
 @app.errorhandler(404)
 def not_found(error):
-    return jsonify(
-        error="Endpoint not found."
-    ), 404
+    return jsonify(error="Endpoint not found."), 404
 
 
 @app.errorhandler(405)
 def method_not_allowed(error):
-    return jsonify(
-        error="HTTP method not allowed."
-    ), 405
+    return jsonify(error="HTTP method not allowed."), 405
 
 
 @app.errorhandler(500)
 def internal_server_error(error):
-    return jsonify(
-        error="Internal server error."
-    ), 500
+    return jsonify(error="Internal server error."), 500
 
 
 # ---------------------------------------------------------------------------
@@ -463,12 +404,7 @@ def internal_server_error(error):
 
 if __name__ == "__main__":
 
-    port = int(
-        os.environ.get(
-            "PORT",
-            "5000",
-        )
-    )
+    port = int(os.environ.get("PORT", "5000"))
 
     app.run(
         host="0.0.0.0",
