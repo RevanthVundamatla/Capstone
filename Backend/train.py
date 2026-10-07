@@ -12,13 +12,12 @@ The dataset is split into:
 
 Training uses only the training split.
 
-The best checkpoint is selected using validation PSNR + SSIM.
+The best checkpoint is selected using a combined validation score
+(PSNR, SSIM, UIQM, UCIQE and color cast), not PSNR alone, because
+PSNR-only selection rewards washed-out, desaturated results.
 
-Final evaluation reports:
-    PSNR
-    SSIM
-    UIQM
-    UCIQE
+Images are resized so the longest side is --max-dim (default 256),
+matching what the deployed website does.
 """
 
 from __future__ import annotations
@@ -32,11 +31,20 @@ import numpy as np
 
 from ddpg.agent import DDPGAgent
 from ddpg.replay_buffer import ReplayBuffer
-from enhancement.environment import UnderwaterEnhanceEnv
+from enhancement.environment import (
+    UnderwaterEnhanceEnv,
+    PSNR_NORM,
+    UIQM_NORM,
+    UCIQE_NORM,
+    color_cast,
+)
 from metrics.metrics import psnr, ssim, uiqm, uciqe
 
 
 IMG_EXTS = (".png", ".jpg", ".jpeg", ".bmp")
+
+# Set from --max-dim in train()
+IMAGE_MAX_DIM = 256
 
 
 # =========================================================
@@ -44,6 +52,11 @@ IMG_EXTS = (".png", ".jpg", ".jpeg", ".bmp")
 # =========================================================
 
 def load_image(path: str) -> np.ndarray:
+    """
+    Load image as RGB float32 in [0, 1], resized so the
+    longest side is at most IMAGE_MAX_DIM.
+    """
+
     img = cv2.imread(path, cv2.IMREAD_COLOR)
 
     if img is None:
@@ -51,7 +64,38 @@ def load_image(path: str) -> np.ndarray:
 
     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
+    h, w = img.shape[:2]
+
+    if IMAGE_MAX_DIM and max(h, w) > IMAGE_MAX_DIM:
+
+        scale = IMAGE_MAX_DIM / max(h, w)
+
+        img = cv2.resize(
+            img,
+            (max(1, int(w * scale)), max(1, int(h * scale))),
+            interpolation=cv2.INTER_AREA,
+        )
+
     return img.astype(np.float32) / 255.0
+
+
+def load_pair(raw_path: str, ref_path: str):
+    """
+    Load a raw/reference pair with identical dimensions.
+    """
+
+    raw_img = load_image(raw_path)
+    ref_img = load_image(ref_path)
+
+    if raw_img.shape != ref_img.shape:
+
+        ref_img = cv2.resize(
+            ref_img,
+            (raw_img.shape[1], raw_img.shape[0]),
+            interpolation=cv2.INTER_AREA,
+        )
+
+    return raw_img, ref_img
 
 
 # =========================================================
@@ -113,10 +157,7 @@ def list_pairs(
             f"Reference: {ref_dir}"
         )
 
-    ref_by_name = {
-        name: name
-        for name in ref_names
-    }
+    ref_by_name = {name: name for name in ref_names}
 
     pairs = []
 
@@ -210,24 +251,19 @@ def evaluate_agent(
     max_steps=3
 ):
 
-    env = UnderwaterEnhanceEnv(
-        max_steps=max_steps
-    )
+    env = UnderwaterEnhanceEnv(max_steps=max_steps)
 
     psnr_values = []
     ssim_values = []
     uiqm_values = []
     uciqe_values = []
+    cast_values = []
 
     for raw_path, ref_path in pairs:
 
-        raw_img = load_image(raw_path)
-        ref_img = load_image(ref_path)
+        raw_img, ref_img = load_pair(raw_path, ref_path)
 
-        state = env.reset(
-            raw_img,
-            ref_img
-        )
+        state = env.reset(raw_img, ref_img)
 
         done = False
 
@@ -238,36 +274,42 @@ def evaluate_agent(
                 noise_std=0.0
             )
 
-            state, reward, done, info = env.step(
-                action
-            )
+            state, reward, done, info = env.step(action)
 
         restored = env.current
 
-        psnr_values.append(
-            psnr(restored, ref_img)
-        )
-
-        ssim_values.append(
-            ssim(restored, ref_img)
-        )
-
-        uiqm_values.append(
-            uiqm(restored)
-        )
-
-        uciqe_values.append(
-            uciqe(restored)
-        )
+        psnr_values.append(psnr(restored, ref_img))
+        ssim_values.append(ssim(restored, ref_img))
+        uiqm_values.append(uiqm(restored))
+        uciqe_values.append(uciqe(restored))
+        cast_values.append(color_cast(restored))
 
     results = {
         "psnr": float(np.mean(psnr_values)),
         "ssim": float(np.mean(ssim_values)),
         "uiqm": float(np.mean(uiqm_values)),
         "uciqe": float(np.mean(uciqe_values)),
+        "cast": float(np.mean(cast_values)),
     }
 
     return results
+
+
+def validation_score(results: dict) -> float:
+    """
+    Combined score used to pick the best checkpoint.
+
+    PSNR alone prefers desaturated, washed-out outputs, so quality
+    and color-cast terms are included.
+    """
+
+    return float(
+        0.30 * min(results["psnr"] / PSNR_NORM, 1.0)
+        + 0.25 * min(max(results["ssim"], 0.0), 1.0)
+        + 0.25 * min(results["uiqm"] / UIQM_NORM, 1.0)
+        + 0.20 * min(results["uciqe"] / UCIQE_NORM, 1.0)
+        - 0.50 * results["cast"]
+    )
 
 
 # =========================================================
@@ -275,6 +317,9 @@ def evaluate_agent(
 # =========================================================
 
 def train(args):
+
+    global IMAGE_MAX_DIM
+    IMAGE_MAX_DIM = args.max_dim
 
     # -----------------------------------------------------
     # Load dataset
@@ -308,6 +353,7 @@ def train(args):
     print(f"Training   : {len(train_pairs)}")
     print(f"Validation : {len(val_pairs)}")
     print(f"Test       : {len(test_pairs)}")
+    print(f"Max image side: {IMAGE_MAX_DIM}")
     print("-----------------------------")
     print()
 
@@ -325,25 +371,19 @@ def train(args):
 
         agent.load(args.resume)
 
-        print(
-            f"Resumed model from: {args.resume}"
-        )
+        print(f"Resumed model from: {args.resume}")
 
     # -----------------------------------------------------
     # Replay buffer
     # -----------------------------------------------------
 
-    buffer = ReplayBuffer(
-        capacity=args.buffer_size
-    )
+    buffer = ReplayBuffer(capacity=args.buffer_size)
 
     # -----------------------------------------------------
     # Environment
     # -----------------------------------------------------
 
-    env = UnderwaterEnhanceEnv(
-        max_steps=args.max_steps
-    )
+    env = UnderwaterEnhanceEnv(max_steps=args.max_steps)
 
     # -----------------------------------------------------
     # Training variables
@@ -352,10 +392,9 @@ def train(args):
     noise_std = args.noise_start
 
     reward_history = []
+    action_history = []
 
-    best_val_psnr = -float("inf")
-
-    best_val_ssim = -float("inf")
+    best_val_score = -float("inf")
 
     os.makedirs(
         os.path.dirname(args.checkpoint),
@@ -368,27 +407,13 @@ def train(args):
     # TRAINING LOOP
     # =====================================================
 
-    for episode in range(
-        1,
-        args.episodes + 1
-    ):
+    for episode in range(1, args.episodes + 1):
 
-        raw_path, ref_path = random.choice(
-            train_pairs
-        )
+        raw_path, ref_path = random.choice(train_pairs)
 
-        raw_img = load_image(
-            raw_path
-        )
+        raw_img, ref_img = load_pair(raw_path, ref_path)
 
-        ref_img = load_image(
-            ref_path
-        )
-
-        state = env.reset(
-            raw_img,
-            ref_img
-        )
+        state = env.reset(raw_img, ref_img)
 
         episode_reward = 0.0
 
@@ -420,6 +445,8 @@ def train(args):
                 float(done)
             )
 
+            action_history.append(action)
+
             state = next_state
 
             episode_reward += reward
@@ -445,9 +472,7 @@ def train(args):
             noise_std * args.noise_decay
         )
 
-        reward_history.append(
-            episode_reward
-        )
+        reward_history.append(episode_reward)
 
         # =================================================
         # LOGGING
@@ -456,9 +481,7 @@ def train(args):
         if episode % args.log_every == 0:
 
             avg_reward = np.mean(
-                reward_history[
-                    -args.log_every:
-                ]
+                reward_history[-args.log_every:]
             )
 
             print(
@@ -469,8 +492,30 @@ def train(args):
                 f"psnr={info.get('psnr', float('nan')):.2f}  "
                 f"ssim={info.get('ssim', float('nan')):.3f}  "
                 f"uiqm={info.get('uiqm', float('nan')):.3f}  "
-                f"uciqe={info.get('uciqe', float('nan')):.3f}"
+                f"uciqe={info.get('uciqe', float('nan')):.3f}  "
+                f"cast={info.get('cast', float('nan')):.3f}"
             )
+
+            # Policy-collapse check: if the std of every action
+            # dimension is tiny, the agent applies the same edit to
+            # every image. Healthy training shows std > ~0.05.
+            recent = np.array(
+                action_history[-args.log_every * args.max_steps:]
+            )
+
+            if len(recent) > 0:
+
+                print(
+                    "    action mean:",
+                    np.round(recent.mean(axis=0), 2)
+                )
+
+                print(
+                    "    action std :",
+                    np.round(recent.std(axis=0), 2)
+                )
+
+            action_history = action_history[-args.log_every * args.max_steps:]
 
         # =================================================
         # VALIDATION
@@ -479,10 +524,7 @@ def train(args):
         if episode % args.eval_every == 0:
 
             print()
-            print(
-                f"Evaluating validation set "
-                f"at episode {episode}..."
-            )
+            print(f"Evaluating validation set at episode {episode}...")
 
             val_results = evaluate_agent(
                 agent,
@@ -490,52 +532,25 @@ def train(args):
                 args.max_steps
             )
 
+            score = validation_score(val_results)
+
             print(
                 f"Validation -> "
                 f"PSNR: {val_results['psnr']:.3f} | "
                 f"SSIM: {val_results['ssim']:.4f} | "
                 f"UIQM: {val_results['uiqm']:.4f} | "
-                f"UCIQE: {val_results['uciqe']:.4f}"
+                f"UCIQE: {val_results['uciqe']:.4f} | "
+                f"CAST: {val_results['cast']:.4f} | "
+                f"SCORE: {score:.4f}"
             )
 
-            # -------------------------------------------------
-            # Best model selection
-            #
-            # PSNR is primary.
-            # SSIM is used as a tie-breaker.
-            # -------------------------------------------------
+            if score > best_val_score:
 
-            is_better = False
+                best_val_score = score
 
-            if val_results["psnr"] > best_val_psnr:
+                agent.save(best_checkpoint)
 
-                is_better = True
-
-            elif (
-                abs(
-                    val_results["psnr"]
-                    - best_val_psnr
-                ) < 1e-6
-                and val_results["ssim"]
-                > best_val_ssim
-            ):
-
-                is_better = True
-
-            if is_better:
-
-                best_val_psnr = val_results["psnr"]
-
-                best_val_ssim = val_results["ssim"]
-
-                agent.save(
-                    best_checkpoint
-                )
-
-                print(
-                    f"  BEST MODEL SAVED -> "
-                    f"{best_checkpoint}"
-                )
+                print(f"  BEST MODEL SAVED -> {best_checkpoint}")
 
             print()
 
@@ -545,33 +560,19 @@ def train(args):
 
         if episode % args.save_every == 0:
 
-            agent.save(
-                args.checkpoint
-            )
+            agent.save(args.checkpoint)
 
-            print(
-                f"  checkpoint saved -> "
-                f"{args.checkpoint}"
-            )
-
+            print(f"  checkpoint saved -> {args.checkpoint}")
 
     # =====================================================
     # FINAL MODEL
     # =====================================================
 
-    agent.save(
-        args.checkpoint
-    )
+    agent.save(args.checkpoint)
 
     print()
-    print(
-        f"Training complete."
-    )
-
-    print(
-        f"Latest checkpoint -> "
-        f"{args.checkpoint}"
-    )
+    print("Training complete.")
+    print(f"Latest checkpoint -> {args.checkpoint}")
 
     # =====================================================
     # LOAD BEST MODEL
@@ -580,13 +581,8 @@ def train(args):
     if os.path.exists(best_checkpoint):
 
         print()
-        print(
-            f"Loading best validation model:"
-        )
-
-        print(
-            best_checkpoint
-        )
+        print("Loading best validation model:")
+        print(best_checkpoint)
 
         best_agent = DDPGAgent(
             device=args.device,
@@ -594,22 +590,15 @@ def train(args):
             tau=args.tau
         )
 
-        best_agent.load(
-            best_checkpoint
-        )
+        best_agent.load(best_checkpoint)
 
         # =================================================
         # FINAL TEST
         # =================================================
 
         print()
-        print(
-            "Final test evaluation"
-        )
-
-        print(
-            "================================"
-        )
+        print("Final test evaluation")
+        print("================================")
 
         test_results = evaluate_agent(
             best_agent,
@@ -617,30 +606,16 @@ def train(args):
             args.max_steps
         )
 
-        print(
-            f"PSNR  : {test_results['psnr']:.4f} dB"
-        )
+        print(f"PSNR  : {test_results['psnr']:.4f} dB")
+        print(f"SSIM  : {test_results['ssim']:.4f}")
+        print(f"UIQM  : {test_results['uiqm']:.4f}")
+        print(f"UCIQE : {test_results['uciqe']:.4f}")
+        print(f"CAST  : {test_results['cast']:.4f}")
 
-        print(
-            f"SSIM  : {test_results['ssim']:.4f}"
-        )
-
-        print(
-            f"UIQM  : {test_results['uiqm']:.4f}"
-        )
-
-        print(
-            f"UCIQE : {test_results['uciqe']:.4f}"
-        )
-
-        print(
-            "================================"
-        )
+        print("================================")
 
         print()
-        print(
-            "Best model is ready for inference."
-        )
+        print("Best model is ready for inference.")
 
 
 # =========================================================
@@ -651,119 +626,36 @@ def parse_args():
 
     p = argparse.ArgumentParser()
 
-    p.add_argument(
-        "--data-dir",
-        default="data/UIEB"
-    )
+    p.add_argument("--data-dir", default="data/UIEB")
+    p.add_argument("--raw-folder", default="raw")
+    p.add_argument("--ref-folder", default="reference")
 
-    p.add_argument(
-        "--raw-folder",
-        default="raw"
-    )
+    p.add_argument("--episodes", type=int, default=30000)
+    p.add_argument("--max-steps", type=int, default=3)
+    p.add_argument("--batch-size", type=int, default=64)
+    p.add_argument("--buffer-size", type=int, default=100_000)
 
-    p.add_argument(
-        "--ref-folder",
-        default="reference"
-    )
+    p.add_argument("--max-dim", type=int, default=256,
+                   help="Resize so the longest image side is at most this")
 
-    p.add_argument(
-        "--episodes",
-        type=int,
-        default=20000
-    )
+    p.add_argument("--gamma", type=float, default=0.9)
+    p.add_argument("--tau", type=float, default=0.005)
 
-    p.add_argument(
-        "--max-steps",
-        type=int,
-        default=3
-    )
+    p.add_argument("--noise-start", type=float, default=0.5)
+    p.add_argument("--noise-end", type=float, default=0.1)
+    p.add_argument("--noise-decay", type=float, default=0.9998)
 
-    p.add_argument(
-        "--batch-size",
-        type=int,
-        default=64
-    )
+    p.add_argument("--device", default="cpu", choices=["cpu", "cuda"])
 
-    p.add_argument(
-        "--buffer-size",
-        type=int,
-        default=100_000
-    )
+    p.add_argument("--checkpoint", default="checkpoints/ddpg_actor_critic.pt")
+    p.add_argument("--best-checkpoint", default="checkpoints/best_ddpg_actor_critic.pt")
+    p.add_argument("--resume", default=None)
 
-    p.add_argument(
-        "--gamma",
-        type=float,
-        default=0.9
-    )
+    p.add_argument("--log-every", type=int, default=50)
+    p.add_argument("--eval-every", type=int, default=500)
+    p.add_argument("--save-every", type=int, default=500)
 
-    p.add_argument(
-        "--tau",
-        type=float,
-        default=0.005
-    )
-
-    p.add_argument(
-        "--noise-start",
-        type=float,
-        default=0.3
-    )
-
-    p.add_argument(
-        "--noise-end",
-        type=float,
-        default=0.02
-    )
-
-    p.add_argument(
-        "--noise-decay",
-        type=float,
-        default=0.9995
-    )
-
-    p.add_argument(
-        "--device",
-        default="cpu",
-        choices=["cpu", "cuda"]
-    )
-
-    p.add_argument(
-        "--checkpoint",
-        default="checkpoints/ddpg_actor_critic.pt"
-    )
-
-    p.add_argument(
-        "--best-checkpoint",
-        default="checkpoints/best_ddpg_actor_critic.pt"
-    )
-
-    p.add_argument(
-        "--resume",
-        default=None
-    )
-
-    p.add_argument(
-        "--log-every",
-        type=int,
-        default=50
-    )
-
-    p.add_argument(
-        "--eval-every",
-        type=int,
-        default=500
-    )
-
-    p.add_argument(
-        "--save-every",
-        type=int,
-        default=500
-    )
-
-    p.add_argument(
-        "--seed",
-        type=int,
-        default=42
-    )
+    p.add_argument("--seed", type=int, default=42)
 
     return p.parse_args()
 
