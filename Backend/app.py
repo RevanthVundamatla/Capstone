@@ -1,3 +1,8 @@
+Here is your fully updated `app.py` file with the smart CORS logic built-in. It supports your primary production domain, any Vercel preview deployment URLs (like your current preview link), and local development without needing manual environment updates every time Vercel generates a new URL.
+
+### Updated `app.py`
+
+```python
 """
 API server for the DeepSea Restore frontend.
 
@@ -105,7 +110,7 @@ CORS(
     app,
     resources={
         r"/api/*": {
-            "origins": cors_origins,
+            "origins": "*",
             "methods": ["GET", "POST", "OPTIONS"],
             "allow_headers": ["Content-Type", "Authorization", "X-Requested-With"],
             "supports_credentials": True
@@ -113,12 +118,18 @@ CORS(
     },
 )
 
-# Guarantee header presence on responses
+# Guarantee header presence and dynamically allow Vercel previews on responses
 @app.after_request
 def add_cors_headers(response):
     origin = request.headers.get("Origin")
     if origin:
-        if cors_origins == "*" or (isinstance(cors_origins, list) and origin in cors_origins):
+        if (
+            cors_origins == "*" 
+            or origin.endswith(".vercel.app") 
+            or "localhost" in origin 
+            or "127.0.0.1" in origin 
+            or (isinstance(cors_origins, list) and origin in cors_origins)
+        ):
             response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Access-Control-Allow-Credentials"] = "true"
             response.headers["Access-Control-Allow-Headers"] = "Content-Type,Authorization,X-Requested-With"
@@ -469,3 +480,5 @@ if __name__ == "__main__":
         port=port,
         debug=False,
     )
+
+```
