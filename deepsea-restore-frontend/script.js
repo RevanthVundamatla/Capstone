@@ -10,6 +10,9 @@ const resetBtn = document.getElementById('resetBtn');
 // Render backend URL
 const API_URL = "https://capstone-deepsea-restore-backend.onrender.com";
 
+// Download button
+let downloadBtn = null;
+
 browseBtn.addEventListener('click', (e) => {
   e.stopPropagation();
   fileInput.click();
@@ -96,6 +99,11 @@ function resetDemo() {
 
   canvasAfter.width = 0;
   canvasAfter.height = 0;
+
+  if (downloadBtn) {
+    downloadBtn.remove();
+    downloadBtn = null;
+  }
 }
 
 
@@ -126,7 +134,11 @@ async function restoreWithModel(file, targetCanvas) {
     // Backend expects the uploaded image as "image"
     formData.append('image', file, file.name);
 
-    // Call Render backend
+    console.log('API URL:', API_URL);
+    console.log('Sending file:', file.name);
+    console.log('File type:', file.type);
+    console.log('File size:', file.size);
+
     const response = await fetch(
       `${API_URL}/api/restore`,
       {
@@ -137,13 +149,17 @@ async function restoreWithModel(file, targetCanvas) {
 
     console.log('Backend HTTP status:', response.status);
 
+    const responseText = await response.text();
+
+    console.log('Raw backend response:', responseText);
+
     let result;
 
     try {
-      result = await response.json();
+      result = JSON.parse(responseText);
     } catch (jsonError) {
       throw new Error(
-        `Backend returned an invalid response. HTTP ${response.status}`
+        `Backend returned invalid JSON. HTTP ${response.status}`
       );
     }
 
@@ -166,12 +182,12 @@ async function restoreWithModel(file, targetCanvas) {
     }
 
     // Display restored image
-    displayRestoredImage(
+    await displayRestoredImage(
       result.image,
       targetCanvas
     );
 
-    // Display real metrics
+    // Display metrics
     if (result.metrics) {
 
       updateMetrics(
@@ -184,6 +200,11 @@ async function restoreWithModel(file, targetCanvas) {
         'No metrics were returned by the backend.'
       );
     }
+
+    // Create download button
+    createDownloadButton(
+      result.image
+    );
 
     console.log(
       'Image restoration completed successfully.'
@@ -201,7 +222,7 @@ async function restoreWithModel(file, targetCanvas) {
     alert(
       'Image restoration failed.\n\n' +
       error.message +
-      '\n\nPlease check the Render backend and try again.'
+      '\n\nOpen the browser Console (F12) for more details.'
     );
   }
 }
@@ -212,60 +233,110 @@ function displayRestoredImage(
   targetCanvas
 ) {
 
-  const restoredImage = new Image();
+  return new Promise((resolve, reject) => {
 
-  restoredImage.onload = () => {
+    const restoredImage = new Image();
 
-    targetCanvas.width =
-      restoredImage.naturalWidth;
+    restoredImage.onload = () => {
 
-    targetCanvas.height =
-      restoredImage.naturalHeight;
+      console.log(
+        'Restored image loaded:',
+        restoredImage.naturalWidth,
+        'x',
+        restoredImage.naturalHeight
+      );
 
-    const context =
-      targetCanvas.getContext('2d');
+      targetCanvas.width =
+        restoredImage.naturalWidth;
 
-    context.clearRect(
-      0,
-      0,
-      targetCanvas.width,
-      targetCanvas.height
-    );
+      targetCanvas.height =
+        restoredImage.naturalHeight;
 
-    context.drawImage(
-      restoredImage,
-      0,
-      0,
-      targetCanvas.width,
-      targetCanvas.height
-    );
-  };
+      const context =
+        targetCanvas.getContext('2d');
 
-  restoredImage.onerror = () => {
+      context.clearRect(
+        0,
+        0,
+        targetCanvas.width,
+        targetCanvas.height
+      );
 
-    console.error(
-      'Could not load restored image.'
-    );
+      context.drawImage(
+        restoredImage,
+        0,
+        0,
+        targetCanvas.width,
+        targetCanvas.height
+      );
 
-    alert(
-      'The backend returned an invalid restored image.'
-    );
-  };
+      resolve();
+    };
 
-  // Backend returns a complete data URL
-  if (
-    typeof imageData === 'string' &&
-    imageData.startsWith('data:image')
-  ) {
+    restoredImage.onerror = (error) => {
 
-    restoredImage.src = imageData;
+      console.error(
+        'Could not load restored image:',
+        error
+      );
 
-  } else {
+      reject(
+        new Error(
+          'The backend returned an invalid restored image.'
+        )
+      );
+    };
 
-    // Backend returns raw Base64
-    restoredImage.src =
-      `data:image/png;base64,${imageData}`;
+    // Backend returns a complete PNG data URL
+    if (
+      typeof imageData === 'string' &&
+      imageData.startsWith('data:image')
+    ) {
+
+      restoredImage.src = imageData;
+
+    } else {
+
+      // Fallback for raw Base64
+      restoredImage.src =
+        `data:image/png;base64,${imageData}`;
+    }
+  });
+}
+
+
+function createDownloadButton(imageData) {
+
+  if (downloadBtn) {
+    downloadBtn.remove();
   }
+
+  downloadBtn = document.createElement('a');
+
+  downloadBtn.textContent =
+    'Download restored image';
+
+  downloadBtn.className =
+    'reset-btn';
+
+  downloadBtn.style.display =
+    'inline-block';
+
+  downloadBtn.style.textDecoration =
+    'none';
+
+  downloadBtn.style.marginLeft =
+    '10px';
+
+  downloadBtn.href =
+    imageData;
+
+  downloadBtn.download =
+    'deepsea-restored.png';
+
+  resetBtn.parentNode.appendChild(
+    downloadBtn
+  );
 }
 
 
@@ -311,37 +382,43 @@ function updateMetrics(metrics) {
       return;
     }
 
-    if (
-      metrics[key] === undefined ||
-      metrics[key] === null
-    ) {
-      return;
-    }
-
     const valueElement =
       row.querySelector('.metric-val');
 
     const fillElement =
       row.querySelector('.metric-fill');
 
+    if (
+      metrics[key] === undefined ||
+      metrics[key] === null
+    ) {
+
+      valueElement.textContent =
+        'N/A';
+
+      fillElement.style.width =
+        '0%';
+
+      return;
+    }
+
     const value =
       Number(metrics[key]);
 
     if (Number.isNaN(value)) {
 
-      valueElement.textContent = '—';
+      valueElement.textContent =
+        'N/A';
 
       return;
     }
 
-    // Display metric value
     valueElement.textContent =
       value.toFixed(
         metricConfig[key].decimals
       ) +
       metricConfig[key].suffix;
 
-    // Progress bar percentage
     let percentage = 0;
 
     if (key === 'psnr') {
