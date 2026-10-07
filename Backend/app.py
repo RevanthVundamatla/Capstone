@@ -1,8 +1,3 @@
-Here is your fully updated `app.py` file with the smart CORS logic built-in. It supports your primary production domain, any Vercel preview deployment URLs (like your current preview link), and local development without needing manual environment updates every time Vercel generates a new URL.
-
-### Updated `app.py`
-
-```python
 """
 API server for the DeepSea Restore frontend.
 
@@ -480,5 +475,3 @@ if __name__ == "__main__":
         port=port,
         debug=False,
     )
-
-```
