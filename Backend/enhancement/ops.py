@@ -9,7 +9,7 @@ The DDPG actor outputs a 7-dimensional continuous action vector:
     4. gamma
     5. contrast
     6. saturation
-    7. dehaze_strength
+    7. local_contrast   (CLAHE strength)
 
 The actor outputs values in [-1, 1].
 Those values are converted into physically meaningful
@@ -37,15 +37,21 @@ import numpy as np
 # =========================================================
 # ACTION RANGES
 # =========================================================
+# Notes on the design:
+#   - saturation never goes below 1.0, so the agent cannot
+#     "win" PSNR by washing the image out.
+#   - red gain has a high upper bound because red light is
+#     absorbed first underwater.
+#   - blue gain can go well below 1.0 to remove blue casts.
 
 RANGES = {
-    "red_gain": (0.7, 1.5),
-    "green_gain": (0.7, 1.4),
-    "blue_gain": (0.6, 1.2),
-    "gamma": (0.6, 1.6),
-    "contrast": (0.7, 1.5),
-    "saturation": (0.7, 1.6),
-    "dehaze_strength": (0.0, 1.0),
+    "red_gain": (0.9, 1.8),
+    "green_gain": (0.85, 1.2),
+    "blue_gain": (0.6, 1.1),
+    "gamma": (0.7, 1.4),
+    "contrast": (0.9, 1.4),
+    "saturation": (1.0, 1.6),
+    "local_contrast": (0.0, 1.0),
 }
 
 
@@ -56,7 +62,7 @@ ACTION_ORDER = [
     "gamma",
     "contrast",
     "saturation",
-    "dehaze_strength",
+    "local_contrast",
 ]
 
 
@@ -69,21 +75,9 @@ def scale_action(action: np.ndarray) -> dict:
     Convert DDPG action values from [-1, 1] into
     physical enhancement parameters.
 
-    Example:
-
         -1 -> lower bound
          0 -> midpoint
         +1 -> upper bound
-
-    Parameters
-    ----------
-    action:
-        NumPy array containing 7 values in [-1, 1].
-
-    Returns
-    -------
-    dict
-        Named enhancement parameters.
     """
 
     action = np.asarray(
@@ -97,26 +91,16 @@ def scale_action(action: np.ndarray) -> dict:
             f"but received {len(action)}."
         )
 
-    action = np.clip(
-        action,
-        -1.0,
-        1.0
-    )
+    action = np.clip(action, -1.0, 1.0)
 
     params = {}
 
-    for name, value in zip(
-        ACTION_ORDER,
-        action
-    ):
+    for name, value in zip(ACTION_ORDER, action):
 
         lo, hi = RANGES[name]
 
         params[name] = float(
-            lo
-            + (float(value) + 1.0)
-            * 0.5
-            * (hi - lo)
+            lo + (float(value) + 1.0) * 0.5 * (hi - lo)
         )
 
     return params
@@ -134,12 +118,6 @@ def _white_balance(
 ) -> np.ndarray:
     """
     Apply independent RGB channel gains.
-
-    Input:
-        RGB float32 image in [0, 1].
-
-    Output:
-        RGB float32 image in [0, 1].
     """
 
     out = img.copy()
@@ -148,11 +126,7 @@ def _white_balance(
     out[..., 1] *= g_gain
     out[..., 2] *= b_gain
 
-    return np.clip(
-        out,
-        0.0,
-        1.0
-    )
+    return np.clip(out, 0.0, 1.0)
 
 
 # =========================================================
@@ -164,37 +138,19 @@ def _gamma_correct(
     gamma: float
 ) -> np.ndarray:
     """
-    Apply gamma correction.
+    output = input ^ (1 / gamma)
 
-    Formula:
-
-        output = input ^ (1 / gamma)
-
-    gamma < 1:
-        darker correction
-
-    gamma > 1:
-        brighter correction
+    gamma > 1: brighter
+    gamma < 1: darker
     """
 
-    gamma = max(
-        float(gamma),
-        1e-6
-    )
+    gamma = max(float(gamma), 1e-6)
 
-    safe_img = np.clip(
-        img,
-        1e-6,
-        1.0
-    )
+    safe_img = np.clip(img, 1e-6, 1.0)
 
     out = safe_img ** (1.0 / gamma)
 
-    return np.clip(
-        out,
-        0.0,
-        1.0
-    )
+    return np.clip(out, 0.0, 1.0)
 
 
 # =========================================================
@@ -211,21 +167,11 @@ def _contrast(
 
     factor = float(factor)
 
-    mean = float(
-        img.mean()
-    )
+    mean = float(img.mean())
 
-    out = (
-        (img - mean)
-        * factor
-        + mean
-    )
+    out = (img - mean) * factor + mean
 
-    return np.clip(
-        out,
-        0.0,
-        1.0
-    )
+    return np.clip(out, 0.0, 1.0)
 
 
 # =========================================================
@@ -239,8 +185,8 @@ def _saturation(
     """
     Adjust HSV saturation.
 
-    OpenCV internally works with uint8 HSV,
-    so the image is temporarily converted to uint8.
+    OpenCV works with uint8 HSV, so the image is
+    temporarily converted to uint8.
     """
 
     factor = float(factor)
@@ -258,172 +204,58 @@ def _saturation(
 
     hsv[..., 1] *= factor
 
-    hsv[..., 1] = np.clip(
-        hsv[..., 1],
-        0.0,
-        255.0
-    )
+    hsv[..., 1] = np.clip(hsv[..., 1], 0.0, 255.0)
 
     out = cv2.cvtColor(
         hsv.astype(np.uint8),
         cv2.COLOR_HSV2RGB
     )
 
-    return (
-        out.astype(np.float32)
-        / 255.0
-    )
+    return out.astype(np.float32) / 255.0
 
 
 # =========================================================
-# DARK CHANNEL
+# LOCAL CONTRAST (CLAHE)
 # =========================================================
 
-def _dark_channel(
+def _local_contrast(
     img: np.ndarray,
-    patch_size: int = 15
+    strength: float
 ) -> np.ndarray:
     """
-    Calculate the dark channel prior.
+    CLAHE on the L channel, blended with the original by strength.
 
-    For every pixel:
+    strength = 0: no change
+    strength = 1: full CLAHE
 
-        dark_channel =
-            local minimum across RGB channels
-            followed by morphological erosion.
+    This replaces the old dark-channel dehaze step, which produced
+    blocky artifacts and does not suit underwater scenes.
     """
 
-    min_channel = np.min(
-        img,
-        axis=2
-    )
-
-    kernel = cv2.getStructuringElement(
-        cv2.MORPH_RECT,
-        (
-            patch_size,
-            patch_size
-        )
-    )
-
-    dark = cv2.erode(
-        min_channel,
-        kernel
-    )
-
-    return dark
-
-
-# =========================================================
-# DEHAZE
-# =========================================================
-
-def _dehaze(
-    img: np.ndarray,
-    strength: float,
-    patch_size: int = 15,
-    t_min: float = 0.1,
-) -> np.ndarray:
-    """
-    Lightweight dark-channel-prior dehazing.
-
-    The DDPG agent controls the strength continuously.
-
-    strength = 0
-        No dehazing.
-
-    strength = 1
-        Maximum dehazing within this implementation.
-    """
-
-    strength = float(
-        np.clip(
-            strength,
-            0.0,
-            1.0
-        )
-    )
+    strength = float(np.clip(strength, 0.0, 1.0))
 
     if strength <= 1e-3:
         return img.copy()
 
-    dark = _dark_channel(
-        img,
-        patch_size
+    rgb8 = np.clip(img * 255.0, 0, 255).astype(np.uint8)
+
+    lab = cv2.cvtColor(rgb8, cv2.COLOR_RGB2LAB)
+
+    clahe = cv2.createCLAHE(
+        clipLimit=2.0,
+        tileGridSize=(8, 8)
     )
 
-    num_pixels = dark.size
+    l_original = lab[..., 0].astype(np.float32)
+    l_equalized = clahe.apply(lab[..., 0]).astype(np.float32)
 
-    num_brightest = max(
-        int(num_pixels * 0.001),
-        1
-    )
+    blended = (1.0 - strength) * l_original + strength * l_equalized
 
-    flat_dark = dark.reshape(-1)
+    lab[..., 0] = np.clip(blended, 0, 255).astype(np.uint8)
 
-    flat_img = img.reshape(
-        -1,
-        3
-    )
+    out = cv2.cvtColor(lab, cv2.COLOR_LAB2RGB)
 
-    # Find pixels with the brightest dark-channel values.
-    idx = np.argpartition(
-        flat_dark,
-        -num_brightest
-    )[-num_brightest:]
-
-    atmospheric_light = (
-        flat_img[idx].max(
-            axis=0
-        )
-    )
-
-    atmospheric_light = np.clip(
-        atmospheric_light,
-        0.3,
-        1.0
-    )
-
-    # Normalize image by atmospheric light.
-    norm_img = (
-        img
-        / (
-            atmospheric_light
-            + 1e-6
-        )
-    )
-
-    dark_norm = _dark_channel(
-        norm_img,
-        patch_size
-    )
-
-    transmission = (
-        1.0
-        - strength * dark_norm
-    )
-
-    transmission = np.clip(
-        transmission,
-        t_min,
-        1.0
-    )
-
-    transmission = transmission[
-        ...,
-        None
-    ]
-
-    recovered = (
-        img
-        - atmospheric_light
-    ) / transmission + atmospheric_light
-
-    return np.clip(
-        recovered,
-        0.0,
-        1.0
-    )
+    return out.astype(np.float32) / 255.0
 
 
 # =========================================================
@@ -437,29 +269,14 @@ def apply_enhancement(
     """
     Apply all enhancement operations selected by the DDPG actor.
 
-    Parameters
-    ----------
     img:
-        RGB image with shape H x W x 3.
-        float32 values in [0, 1].
+        RGB image, H x W x 3, float32 in [0, 1].
 
     action:
         Seven-dimensional DDPG action in [-1, 1].
-
-    Returns
-    -------
-    np.ndarray
-        Enhanced RGB float32 image in [0, 1].
     """
 
-    # -----------------------------------------------------
-    # Validate input image
-    # -----------------------------------------------------
-
-    img = np.asarray(
-        img,
-        dtype=np.float32
-    )
+    img = np.asarray(img, dtype=np.float32)
 
     if img.ndim != 3:
         raise ValueError(
@@ -473,24 +290,11 @@ def apply_enhancement(
             f"got shape {img.shape}"
         )
 
-    img = np.clip(
-        img,
-        0.0,
-        1.0
-    )
+    img = np.clip(img, 0.0, 1.0)
 
-    # -----------------------------------------------------
-    # Convert DDPG action into parameters
-    # -----------------------------------------------------
+    params = scale_action(action)
 
-    params = scale_action(
-        action
-    )
-
-    # -----------------------------------------------------
     # 1. White balance
-    # -----------------------------------------------------
-
     out = _white_balance(
         img,
         params["red_gain"],
@@ -498,48 +302,16 @@ def apply_enhancement(
         params["blue_gain"],
     )
 
-    # -----------------------------------------------------
-    # 2. Dark-channel dehazing
-    # -----------------------------------------------------
+    # 2. Gamma
+    out = _gamma_correct(out, params["gamma"])
 
-    out = _dehaze(
-        out,
-        params["dehaze_strength"]
-    )
+    # 3. Local contrast (CLAHE)
+    out = _local_contrast(out, params["local_contrast"])
 
-    # -----------------------------------------------------
-    # 3. Gamma correction
-    # -----------------------------------------------------
+    # 4. Global contrast
+    out = _contrast(out, params["contrast"])
 
-    out = _gamma_correct(
-        out,
-        params["gamma"]
-    )
-
-    # -----------------------------------------------------
-    # 4. Contrast
-    # -----------------------------------------------------
-
-    out = _contrast(
-        out,
-        params["contrast"]
-    )
-
-    # -----------------------------------------------------
     # 5. Saturation
-    # -----------------------------------------------------
+    out = _saturation(out, params["saturation"])
 
-    out = _saturation(
-        out,
-        params["saturation"]
-    )
-
-    # -----------------------------------------------------
-    # Final safety clipping
-    # -----------------------------------------------------
-
-    return np.clip(
-        out,
-        0.0,
-        1.0
-    ).astype(np.float32)
+    return np.clip(out, 0.0, 1.0).astype(np.float32)
