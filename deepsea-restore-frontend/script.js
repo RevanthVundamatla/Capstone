@@ -7,11 +7,19 @@ const imgBefore = document.getElementById('imgBefore');
 const canvasAfter = document.getElementById('imgAfter');
 const resetBtn = document.getElementById('resetBtn');
 
+// Optional reference image (enables PSNR and SSIM on the backend)
+const refInput = document.getElementById('refInput');
+
 // Render backend URL
 const API_URL = "https://capstone-deepsea-restore-backend.onrender.com";
 
 // Max time to wait for the backend (ms). Render free tier can be slow.
 const REQUEST_TIMEOUT_MS = 5 * 60 * 1000;
+
+// Bar scales for the no-reference metrics.
+// Keep these in sync with UIQM_NORM and UCIQE_NORM in environment.py.
+const UIQM_BAR_MAX = 6;
+const UCIQE_BAR_MAX = 12;
 
 // Download button + status message
 let downloadBtn = null;
@@ -150,6 +158,11 @@ function resetDemo() {
 
   fileInput.value = '';
 
+  // Clear the optional reference so it is not reused by accident
+  if (refInput) {
+    refInput.value = '';
+  }
+
   clearMetrics();
   hideStatus();
 
@@ -185,6 +198,15 @@ async function postImage(file) {
 
   // Backend expects the uploaded image as "image"
   formData.append('image', file, file.name);
+
+  // Optional reference image: lets the backend compute PSNR and SSIM
+  if (refInput && refInput.files[0]) {
+    formData.append(
+      'reference',
+      refInput.files[0],
+      refInput.files[0].name
+    );
+  }
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -223,6 +245,10 @@ async function restoreWithModel(file, targetCanvas) {
     console.log('Sending file:', file.name);
     console.log('File type:', file.type);
     console.log('File size:', file.size);
+    console.log(
+      'Reference attached:',
+      Boolean(refInput && refInput.files[0])
+    );
 
     let response;
 
@@ -516,13 +542,19 @@ function updateMetrics(metrics) {
     const fillElement =
       row.querySelector('.metric-fill');
 
+    // PSNR and SSIM need a reference image; say so instead of "N/A"
+    const missingText =
+      (key === 'psnr' || key === 'ssim')
+        ? 'needs reference'
+        : 'N/A';
+
     if (
       metrics[key] === undefined ||
       metrics[key] === null
     ) {
 
       valueElement.textContent =
-        'N/A';
+        missingText;
 
       fillElement.style.width =
         '0%';
@@ -536,7 +568,7 @@ function updateMetrics(metrics) {
     if (Number.isNaN(value)) {
 
       valueElement.textContent =
-        'N/A';
+        missingText;
 
       fillElement.style.width =
         '0%';
@@ -565,12 +597,12 @@ function updateMetrics(metrics) {
     } else if (key === 'uiqm') {
 
       percentage =
-        (value / 5) * 100;
+        (value / UIQM_BAR_MAX) * 100;
 
     } else if (key === 'uciqe') {
 
       percentage =
-        value * 100;
+        (value / UCIQE_BAR_MAX) * 100;
     }
 
     percentage =
