@@ -106,3 +106,35 @@ a{color:inherit;}
   .metric-defs{grid-template-columns:1fr;}
   .hero-stats{gap:26px;flex-wrap:wrap;}
 }
+/* ---- side-by-side demo ---- */
+.wrap.wide{max-width:1240px;}
+.ref-picker{margin:0 0 16px;padding:12px 16px;border:1px dashed var(--line);border-radius:8px;font-size:14px;display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;}
+.ref-picker input[type=file]{font-size:13px;color:inherit;max-width:100%;}
+.ref-picker small{flex-basis:100%;color:var(--muted);font-size:12px;}
+.upload-zone.has-image{padding:16px;border-style:solid;min-height:0;}
+.compare-view{gap:20px;align-items:start;}
+.compare-view[hidden]{display:none;}
+.compare-col{margin:0;}
+.compare-label{font-size:.9rem;color:var(--ink);font-weight:500;}
+.frame{position:relative;display:flex;align-items:center;justify-content:center;background:#02090d;border:1px solid var(--line);border-radius:6px;min-height:340px;overflow:hidden;}
+.compare-view .frame img,.compare-view .frame canvas{width:100%;height:auto;max-height:70vh;object-fit:contain;border-radius:0;background:transparent;}
+.panel-loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:10px;background:rgba(7,27,38,.78);color:var(--ink);font-size:.95rem;}
+.panel-loading[hidden]{display:none;}
+.spinner{width:18px;height:18px;border:2px solid var(--line);border-top-color:var(--aqua);border-radius:50%;animation:spin .8s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg);}}
+.actions{margin:14px 0 26px;}
+.actions .reset-btn{margin:0 10px 0 0;}
+.results-grid{display:grid;grid-template-columns:1fr 1.4fr;gap:24px;align-items:start;}
+.metric-row{grid-template-columns:56px 1fr 170px;}
+.metric-val{white-space:nowrap;}
+.legend{float:right;font-size:.75rem;opacity:.8;}
+.metric-val small{color:var(--muted);margin-left:6px;font-size:.75rem;}
+.mini-charts{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+.train-charts{display:grid;grid-template-columns:repeat(2,1fr);gap:20px;}
+.chart-card{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:14px;}
+.chart-card h3{font-family:'Inter',sans-serif;font-size:.85rem;color:var(--muted);font-weight:500;margin:0 0 6px;}
+.chart-card svg{width:100%;height:auto;display:block;}
+.empty{color:var(--muted);font-size:.9rem;margin:0;grid-column:1/-1;}
+@media (max-width:900px){
+  .compare-view,.results-grid,.train-charts,.mini-charts{grid-template-columns:1fr;}
+}
