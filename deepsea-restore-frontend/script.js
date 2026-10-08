@@ -6,6 +6,9 @@ const compareView = document.getElementById('compareView');
 const imgBefore = document.getElementById('imgBefore');
 const canvasAfter = document.getElementById('imgAfter');
 const resetBtn = document.getElementById('resetBtn');
+const resetBtn = document.getElementById('resetBtn');
+const outLoading = document.getElementById('outLoading');
+const passCharts = document.getElementById('passCharts');
 
 // Optional reference image (enables PSNR and SSIM on the backend)
 const refInput = document.getElementById('refInput');
