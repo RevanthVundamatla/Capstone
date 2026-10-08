@@ -22,7 +22,7 @@ const REQUEST_TIMEOUT_MS = 5 * 60 * 1000;
 // Bar scales for the no-reference metrics.
 // Keep these in sync with UIQM_NORM and UCIQE_NORM in environment.py.
 const UIQM_BAR_MAX = 6;
-const UCIQE_BAR_MAX = 12;
+const UCIQE_BAR_MAX = 1;
 
 // Download button + status message
 let downloadBtn = null;
@@ -144,6 +144,7 @@ function handleFile(file) {
 
     uploadPrompt.hidden = true;
     compareView.hidden = false;
+    dropZone.classList.add('has-image');     // NEW
     resetBtn.hidden = false;
 
     clearMetrics();
@@ -156,7 +157,9 @@ function handleFile(file) {
 function resetDemo() {
 
   compareView.hidden = true;
+  dropZone.classList.remove('has-image');    // NEW
   uploadPrompt.hidden = false;
+  if (passCharts) passCharts.innerHTML = '<p class="empty">Restore an image to see how each pass changes the scores.</p>';   // NEW
   resetBtn.hidden = true;
 
   fileInput.value = '';
