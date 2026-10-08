@@ -8,7 +8,32 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
-
+<style>
+  .ref-picker {
+    margin: 0 0 16px;
+    padding: 12px 16px;
+    border: 1px dashed rgba(255, 255, 255, 0.25);
+    border-radius: 10px;
+    font-size: 14px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 16px;
+  }
+  .ref-picker label {
+    opacity: 0.85;
+  }
+  .ref-picker input[type="file"] {
+    font-size: 13px;
+    color: inherit;
+    max-width: 100%;
+  }
+  .ref-picker small {
+    flex-basis: 100%;
+    opacity: 0.6;
+    font-size: 12px;
+  }
+</style>
 </head>
 <body>
 
@@ -17,7 +42,6 @@
     <span class="brand">DeepSea Restore</span>
     <nav class="topnav">
       <a href="#demo">Demo</a>
-      <a href="#training">Training</a>
       <a href="#method">Method</a>
       <a href="#metrics">Metrics</a>
       <a href="#team">Team split</a>
@@ -55,103 +79,307 @@
   </section>
 
   <section id="demo" class="section demo">
-    <div class="wrap wide">
-      <h2>Try a restoration</h2>
-      <p class="section-lede">Drop in an underwater photo. The trained DDPG model restores it and shows the result right next to your input, with scores below.</p>
+    <div class="wrap">
 
-      <div class="ref-picker">
-        <label for="refInput">Optional: reference image (enables PSNR &amp; SSIM)</label>
-        <input type="file" id="refInput" accept="image/*">
-        <small>Choose this first, then upload the underwater photo. The reference must show the same scene.</small>
-      </div>
+  <h2>Try a restoration</h2>
 
-      <div class="upload-zone" id="dropZone">
-        <input type="file" id="fileInput" accept="image/*" hidden>
-        <div id="uploadPrompt" class="upload-prompt">
-          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M12 3v12m0-12l-4 4m4-4l4 4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>
-          <p>Drag an image here, or <button type="button" id="browseBtn">browse</button></p>
-          <p class="hint">JPG or PNG. Your image is processed by the DeepSea Restore model.</p>
-        </div>
-        <div id="compareView" class="compare-view" hidden>
-          <figure class="compare-col">
-            <figcaption class="compare-label">Input (degraded)</figcaption>
-            <div class="frame"><img id="imgBefore" alt="Original underwater photo"></div>
-          </figure>
-          <figure class="compare-col">
-            <figcaption class="compare-label">Restored (DDPG output)</figcaption>
-            <div class="frame">
-              <canvas id="imgAfter"></canvas>
-              <div class="panel-loading" id="outLoading" hidden><span class="spinner"></span>Restoring…</div>
-            </div>
-          </figure>
-        </div>
-      </div>
+  <p class="section-lede">
+    Drop in an underwater photo. The trained DDPG model processes the image through the backend and returns the restored result and evaluation metrics.
+  </p>
 
-      <div class="actions"><button id="resetBtn" class="reset-btn" hidden>Try another image</button></div>
+  <div class="demo-panel">
 
-      <div class="results-grid">
-        <div class="metrics-panel">
-          <p class="metrics-title">Restoration scores <span class="legend">value &nbsp;·&nbsp; <em>input</em></span></p>
-          <div class="metric-row" data-metric="psnr"><span class="metric-name">PSNR</span><span class="metric-bar"><span class="metric-fill"></span></span><span class="metric-val">—</span></div>
-          <div class="metric-row" data-metric="ssim"><span class="metric-name">SSIM</span><span class="metric-bar"><span class="metric-fill"></span></span><span class="metric-val">—</span></div>
-          <div class="metric-row" data-metric="uiqm"><span class="metric-name">UIQM</span><span class="metric-bar"><span class="metric-fill"></span></span><span class="metric-val">—</span></div>
-          <div class="metric-row" data-metric="uciqe"><span class="metric-name">UCIQE</span><span class="metric-bar"><span class="metric-fill"></span></span><span class="metric-val">—</span></div>
-          <p class="metrics-note">UIQM and UCIQE are computed for every image. PSNR and SSIM compare against a reference, so they appear only when you provide one.</p>
-        </div>
-        <div class="metrics-panel">
-          <p class="metrics-title">Metric change per DDPG pass</p>
-          <div id="passCharts" class="mini-charts"><p class="empty">Restore an image to see how each pass changes the scores.</p></div>
-        </div>
-      </div>
+    <!-- Optional reference image: lets the backend compute PSNR and SSIM -->
+    <div class="ref-picker">
+      <label for="refInput">Optional: reference image (enables PSNR &amp; SSIM)</label>
+      <input type="file" id="refInput" accept="image/*">
+      <small>
+        Choose this first, then upload the underwater photo. The reference must show the same scene.
+      </small>
     </div>
-  </section>
 
-  <section id="training" class="section">
-    <div class="wrap wide">
-      <h2>Training graphs</h2>
-      <p class="section-lede">Validation metrics and reward over training. The dashed line on the PSNR graph marks the 30 dB target.</p>
-      <div id="trainCharts" class="train-charts"><p class="empty">Loading…</p></div>
+    <div class="upload-zone" id="dropZone">
+
+      <input type="file" id="fileInput" accept="image/*" hidden>
+
+      <div id="uploadPrompt" class="upload-prompt">
+
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4">
+          <path d="M12 3v12m0-12l-4 4m4-4l4 4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/>
+        </svg>
+
+        <p>
+          Drag an image here, or <button type="button" id="browseBtn">browse</button>
+        </p>
+
+        <p class="hint">
+          JPG or PNG. Your image is processed by the DeepSea Restore model.
+        </p>
+
+      </div>
+
+
+      <div id="compareView" class="compare-view" hidden>
+
+        <div class="compare-col">
+          <span class="compare-label">Input</span>
+          <img id="imgBefore" alt="Original underwater photo">
+        </div>
+
+        <div class="compare-col">
+          <span class="compare-label">DDPG output</span>
+          <canvas id="imgAfter"></canvas>
+        </div>
+
+      </div>
+
     </div>
+
+
+    <div class="metrics-panel">
+
+      <p class="metrics-title">
+        Restoration scores
+      </p>
+
+
+      <div class="metric-row" data-metric="psnr">
+        <span class="metric-name">PSNR</span>
+        <span class="metric-bar"><span class="metric-fill"></span></span>
+        <span class="metric-val">—</span>
+      </div>
+
+
+      <div class="metric-row" data-metric="ssim">
+        <span class="metric-name">SSIM</span>
+        <span class="metric-bar"><span class="metric-fill"></span></span>
+        <span class="metric-val">—</span>
+      </div>
+
+
+      <div class="metric-row" data-metric="uiqm">
+        <span class="metric-name">UIQM</span>
+        <span class="metric-bar"><span class="metric-fill"></span></span>
+        <span class="metric-val">—</span>
+      </div>
+
+
+      <div class="metric-row" data-metric="uciqe">
+        <span class="metric-name">UCIQE</span>
+        <span class="metric-bar"><span class="metric-fill"></span></span>
+        <span class="metric-val">—</span>
+      </div>
+
+
+      <p class="metrics-note">
+        UIQM and UCIQE are computed for every image. PSNR and SSIM compare against a reference, so they appear only when you provide one.
+      </p>
+
+      <!--
+        After training finishes, uncomment this line and replace the
+        numbers with the "Final test evaluation" values from your log:
+
+        <p class="metrics-note">
+          Average on the 89 held-out UIEB test images: PSNR 00.00 dB · SSIM 0.000
+        </p>
+      -->
+
+
+      <button id="resetBtn" class="reset-btn" hidden>
+        Try another image
+      </button>
+
+    </div>
+
+  </div>
+
+</div>
+
   </section>
 
   <section id="method" class="section method">
-    <div class="wrap">
-      <h2>How the agent works</h2>
-      <div class="method-grid">
-        <div class="method-card">
-          <span class="method-index">State</span>
-          <p>Each degraded UIEB frame, downsampled to a small 64×64 copy, becomes the observation the policy reads.</p>
-        </div>
-        <div class="method-card">
-          <span class="method-index">Action</span>
-          <p>DDPG outputs a continuous correction vector: red, green and blue gains, gamma, contrast, saturation, and local-contrast strength.</p>
-        </div>
-        <div class="method-card">
-          <span class="method-index">Reward</span>
-          <p>The corrected frame is scored on PSNR and SSIM against its reference, on UIQM and UCIQE, and on how much color cast it removes; the blended improvement is the reward signal.</p>
-        </div>
-        <div class="method-card">
-          <span class="method-index">Policy</span>
-          <p>An actor-critic pair refines the correction policy over training episodes until scores plateau on the held-out split.</p>
-        </div>
-      </div>
+
+<div class="wrap">
+
+  <h2>How the agent works</h2>
+
+  <div class="method-grid">
+
+    <div class="method-card">
+
+      <span class="method-index">State</span>
+
+      <p>
+        Each degraded UIEB frame, downsampled to a small 64×64 copy, becomes the observation the policy reads.
+      </p>
+
     </div>
+
+
+    <div class="method-card">
+
+      <span class="method-index">Action</span>
+
+      <p>
+        DDPG outputs a continuous correction vector: red, green and blue gains, gamma, contrast, saturation, and local-contrast strength.
+      </p>
+
+    </div>
+
+
+    <div class="method-card">
+
+      <span class="method-index">Reward</span>
+
+      <p>
+        The corrected frame is scored on PSNR and SSIM against its reference, on UIQM and UCIQE, and on how much color cast it removes; the blended improvement is the reward signal.
+      </p>
+
+    </div>
+
+
+    <div class="method-card">
+
+      <span class="method-index">Policy</span>
+
+      <p>
+        An actor-critic pair refines the correction policy over training episodes until scores plateau on the held-out split.
+      </p>
+
+    </div>
+
+  </div>
+
+</div>
+
   </section>
 
   <section id="metrics" class="section metrics-explainer">
-    <div class="wrap">
-      <h2>Why these four metrics</h2>
-      <p class="section-lede">Same dataset, same metrics, same problem statement across the team — only the restoration algorithm changes per person.</p>
-      <dl class="metric-defs">
-        <div><dt>PSNR</dt><dd>Pixel-level fidelity to the reference image, in decibels — higher means less distortion.</dd></div>
-        <div><dt>SSIM</dt><dd>Structural similarity to the reference — how well edges, texture and luminance are preserved.</dd></div>
-        <div><dt>UIQM</dt><dd>Underwater Image Quality Measure — a no-reference score combining colorfulness, sharpness and contrast.</dd></div>
-        <div><dt>UCIQE</dt><dd>Underwater Color Image Quality Evaluation — weights chroma, saturation and luminance variance for underwater scenes.</dd></div>
-      </dl>
+
+<div class="wrap">
+
+  <h2>Why these four metrics</h2>
+
+  <p class="section-lede">
+    Same dataset, same metrics, same problem statement across the team — only the restoration algorithm changes per person.
+  </p>
+
+  <dl class="metric-defs">
+
+    <div>
+      <dt>PSNR</dt>
+      <dd>
+        Pixel-level fidelity to the reference image, in decibels — higher means less distortion.
+      </dd>
     </div>
+
+    <div>
+      <dt>SSIM</dt>
+      <dd>
+        Structural similarity to the reference — how well edges, texture and luminance are preserved.
+      </dd>
+    </div>
+
+    <div>
+      <dt>UIQM</dt>
+      <dd>
+        Underwater Image Quality Measure — a no-reference score combining colorfulness, sharpness and contrast.
+      </dd>
+    </div>
+
+    <div>
+      <dt>UCIQE</dt>
+      <dd>
+        Underwater Color Image Quality Evaluation — weights chroma, saturation and luminance variance for underwater scenes.
+      </dd>
+    </div>
+
+  </dl>
+
+</div>
+
   </section>
 
   <section id="team" class="section team">
-    <div class="wrap">
-      <h2>Team split</h2>
-      <p class="section-lede">Shared problem
+
+<div class="wrap">
+
+  <h2>Team split</h2>
+
+  <p class="section-lede">
+    Shared problem statement, dataset and metrics — four different solutions.
+  </p>
+
+  <div class="team-grid">
+
+    <div class="team-card active">
+
+      <span class="team-tag">This build</span>
+
+      <h3>DDPG</h3>
+
+      <p>
+        Deep Deterministic Policy Gradient — continuous-action actor-critic restoration policy.
+      </p>
+
+    </div>
+
+
+    <div class="team-card">
+
+      <span class="team-tag">Teammate</span>
+
+      <h3>Algorithm 2</h3>
+
+      <p>
+        Slot in a teammate's chosen method here.
+      </p>
+
+    </div>
+
+
+    <div class="team-card">
+
+      <span class="team-tag">Teammate</span>
+
+      <h3>Algorithm 3</h3>
+
+      <p>
+        Slot in a teammate's chosen method here.
+      </p>
+
+    </div>
+
+
+    <div class="team-card">
+
+      <span class="team-tag">Teammate</span>
+
+      <h3>Algorithm 4</h3>
+
+      <p>
+        Slot in a teammate's chosen method here.
+      </p>
+
+    </div>
+
+  </div>
+
+</div>
+
+  </section>
+
+</main>
+
+<footer class="site-footer">
+
+  <div class="wrap">
+    Reinforcement Learning-Based Underwater Degradation Image Restoration · UIEB benchmark
+  </div>
+
+</footer>
+
+<script src="script.js"></script>
+
+</body>
+</html>
