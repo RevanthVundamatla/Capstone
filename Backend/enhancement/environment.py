@@ -34,14 +34,14 @@ REWARD_WEIGHTS = {
 }
 
 PSNR_NORM = 30.0
-UIQM_NORM = 4.0
 
 # The uciqe() in metrics/metrics.py returns values around 3-4
 # (not 0-1), so the old norm of 0.7 clipped every value to 1.0
 # and the UCIQE reward was always zero.
 # IMPORTANT: print uciqe() on ~20 UIEB images and set this to a
 # value slightly above the largest typical result.
-UCIQE_NORM = 6.0
+UIQM_NORM = 6.0
+UCIQE_NORM = 1.0
 
 
 def _clip01(value: float) -> float:
