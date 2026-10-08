@@ -308,14 +308,15 @@ def uciqe(
     """
     Underwater Color Image Quality Evaluation.
 
-    UCIQE is based on CIELab statistics involving:
+    UCIQE is a linear combination of:
         - chroma variation
-        - saturation
         - luminance contrast
+        - mean saturation
 
-    Higher values indicate stronger underwater
-    image-quality characteristics according to
-    the metric.
+    Chroma and luminance are normalised to [0, 1] so the score lands in
+    the usual UCIQE range (roughly 0.3 - 0.8). The earlier version used
+    the raw Lab chroma standard deviation, which produced values of
+    about 2 - 10.
 
     Reference:
         Yang & Sowmya,
@@ -325,104 +326,59 @@ def uciqe(
 
     img = _prepare_image(img)
 
-    rgb8 = (
-        img * 255.0
-    ).astype(
-        np.uint8
-    )
+    rgb8 = np.clip(
+        img * 255.0,
+        0,
+        255
+    ).astype(np.uint8)
 
     lab = cv2.cvtColor(
         rgb8,
         cv2.COLOR_RGB2LAB
-    ).astype(
-        np.float64
-    )
+    ).astype(np.float64)
 
-    # OpenCV LAB:
-    # L is approximately [0, 255]
-    # a and b are approximately [0, 255]
-    #
-    # Convert to conventional CIELab-like scale.
-
-    L = (
-        lab[..., 0] *
-        100.0 /
-        255.0
-    )
-
-    a = lab[..., 1] - 128.0
-    b = lab[..., 2] - 128.0
-
-    # --------------------------------------------------------
-    # Chroma
-    # --------------------------------------------------------
+    # OpenCV 8-bit LAB: L, a and b are all stored in [0, 255].
+    L = lab[..., 0] / 255.0
+    a = lab[..., 1] / 255.0
+    b = lab[..., 2] / 255.0
 
     chroma = np.sqrt(
         a ** 2 +
         b ** 2
     )
 
-    chroma_std = float(
-        np.std(chroma)
+    saturation = chroma / np.sqrt(
+        chroma ** 2 +
+        L ** 2 +
+        1e-12
     )
 
-    # --------------------------------------------------------
-    # Saturation
-    # --------------------------------------------------------
-
-    chroma_max = np.sqrt(
-        128.0 ** 2 +
-        128.0 ** 2
+    mean_chroma = float(
+        np.mean(chroma)
     )
 
-    saturation = (
-        chroma /
-        (chroma_max + 1e-8)
+    # Spread of chroma around its mean
+    chroma_spread = float(
+        np.sqrt(
+            np.mean(
+                np.abs(
+                    1.0 -
+                    (mean_chroma / (chroma + 1e-12)) ** 2
+                )
+            )
+        )
     )
 
-    saturation = np.clip(
-        saturation,
-        0.0,
-        1.0
-    )
-
-    mean_saturation = float(
-        np.mean(saturation)
-    )
-
-    # --------------------------------------------------------
-    # Luminance contrast
-    # --------------------------------------------------------
-
-    L_low = np.percentile(
-        L,
-        1
-    )
-
-    L_high = np.percentile(
-        L,
-        99
-    )
-
+    # Luminance contrast: 99th minus 1st percentile of L
     luminance_contrast = float(
-        (L_high - L_low) /
-        100.0
+        np.percentile(L, 99) -
+        np.percentile(L, 1)
     )
-
-    luminance_contrast = np.clip(
-        luminance_contrast,
-        0.0,
-        1.0
-    )
-
-    # --------------------------------------------------------
-    # UCIQE
-    # --------------------------------------------------------
 
     value = (
-        c1 * chroma_std +
-        c2 * mean_saturation +
-        c3 * luminance_contrast
+        c1 * chroma_spread +
+        c2 * luminance_contrast +
+        c3 * float(np.mean(saturation))
     )
 
     return float(value)
