@@ -7,7 +7,9 @@ GET  /api/health
     -> { status, checkpoint_loaded, device, max_steps }
 
 POST /api/restore
-    multipart form field 'image'
+    multipart form fields:
+        image      (required)  degraded underwater image
+        reference  (optional)  reference image; enables PSNR and SSIM
     -> restored image + metrics
 
 POST /api/restore
@@ -15,7 +17,7 @@ POST /api/restore
     {
         "image": "data:image/png;base64,..."
     }
-    -> restored image + metrics
+    -> restored image + metrics (UIQM and UCIQE only; no reference)
 
 Local:
     python app.py
@@ -248,7 +250,8 @@ def restore():
 
     1. Multipart:
         POST /api/restore
-        field name = image
+        field 'image'      = degraded image (required)
+        field 'reference'  = reference image (optional, enables PSNR/SSIM)
 
     2. JSON:
         {
@@ -258,14 +261,26 @@ def restore():
 
     t_start = time.time()
 
+    reference = None
+
     # ---------------------------------------------------------------
-    # Decode image
+    # Decode image (and optional reference)
     # ---------------------------------------------------------------
 
     try:
 
         if "image" in request.files:
             raw = decode_image(file_storage=request.files["image"])
+
+            if "reference" in request.files:
+                try:
+                    reference = decode_image(
+                        file_storage=request.files["reference"]
+                    )
+                except Exception as exc:
+                    return jsonify(
+                        error=f"Could not decode reference image: {exc}"
+                    ), 400
 
         elif request.is_json:
             data = request.get_json(silent=True)
@@ -309,6 +324,15 @@ def restore():
                 interpolation=cv2.INTER_AREA,
             )
 
+        # The reference must have exactly the same size as the input
+        # for PSNR and SSIM to be computed.
+        if reference is not None:
+            reference = cv2.resize(
+                reference,
+                (raw.shape[1], raw.shape[0]),
+                interpolation=cv2.INTER_AREA,
+            )
+
     except Exception as exc:
         return jsonify(
             error=f"Could not process image dimensions: {exc}"
@@ -316,6 +340,7 @@ def restore():
 
     print(
         f"[restore] decoded + resized to {raw.shape[1]}x{raw.shape[0]} "
+        f"(reference: {'yes' if reference is not None else 'no'}) "
         f"in {time.time() - t_start:.2f}s",
         flush=True,
     )
@@ -333,6 +358,7 @@ def restore():
                 agent,
                 raw,
                 max_steps=MAX_STEPS,
+                reference=reference,
             )
 
         print(
