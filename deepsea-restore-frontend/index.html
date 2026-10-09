@@ -1,111 +1,533 @@
+```html
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>DeepSea Restore — RL-Based Underwater Image Restoration</title>
+
+  <meta
+    name="description"
+    content="DeepSea Restore uses a trained DDPG model to restore underwater images."
+  >
+
+  <title>DeepSea Restore | Underwater Image Restoration</title>
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <link
+    href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@600;700&display=swap"
+    rel="stylesheet"
+  >
+
   <link rel="stylesheet" href="style.css">
 
   <style>
-    /* Reference upload: always above the raw image upload */
-    .ref-picker {
+    :root {
+      --bg: #071d25;
+      --panel: #102f36;
+      --panel-light: #153940;
+      --text: #e9f1f2;
+      --muted: #9bb6bc;
+      --accent: #79c7ce;
+      --border: rgba(180, 220, 225, 0.17);
+      --radius: 12px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+      scroll-padding-top: 85px;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "DM Sans", sans-serif;
+      line-height: 1.65;
+    }
+
+    img,
+    canvas {
+      max-width: 100%;
+    }
+
+    a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    button,
+    input {
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    .container {
+      width: min(1120px, calc(100% - 40px));
+      margin-inline: auto;
+    }
+
+    .site-header {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(7, 29, 37, 0.96);
+      border-bottom: 1px solid var(--border);
+      backdrop-filter: blur(12px);
+    }
+
+    .nav {
+      min-height: 76px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+    }
+
+    .brand {
+      font-family: "Playfair Display", serif;
+      font-size: 23px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 28px;
+      color: var(--muted);
+    }
+
+    .nav-links a:hover {
+      color: var(--accent);
+    }
+
+    section {
+      padding: 76px 0;
+    }
+
+    .section-title {
+      margin: 0 0 12px;
+      font-family: "Playfair Display", serif;
+      font-size: clamp(30px, 4vw, 44px);
+      line-height: 1.2;
+    }
+
+    .section-description {
+      max-width: 760px;
+      margin: 0 0 34px;
+      color: var(--muted);
+      font-size: 17px;
+    }
+
+    .eyebrow {
+      margin-bottom: 10px;
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+    }
+
+    /* HERO */
+
+    .hero {
+      padding: 90px 0 65px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .hero h1 {
+      max-width: 820px;
+      margin: 0 0 20px;
+      font-family: "Playfair Display", serif;
+      font-size: clamp(40px, 7vw, 70px);
+      line-height: 1.12;
+    }
+
+    .hero p {
+      max-width: 700px;
+      color: var(--muted);
+      font-size: 18px;
+    }
+
+    .hero-link {
+      display: inline-block;
+      margin-top: 18px;
+      padding: 12px 22px;
+      border-radius: 8px;
+      background: var(--accent);
+      color: #09252b;
+      font-weight: 700;
+    }
+
+    /* DEMO */
+
+    .demo-section {
+      padding-top: 56px;
+    }
+
+    .demo-heading {
+      margin-bottom: 34px;
+    }
+
+    .demo-heading .section-title {
+      font-size: clamp(32px, 4vw, 42px);
+    }
+
+    .demo-heading .section-description {
+      margin-bottom: 0;
+    }
+
+    /*
+      Main correction:
+      Step 1, Step 2, comparison and metrics use a
+      single-column vertical layout.
+    */
+
+    .restoration-layout {
       display: flex;
       flex-direction: column;
-      align-items: flex-start;
-      gap: 10px;
+      align-items: stretch;
+      gap: 24px;
       width: 100%;
-      box-sizing: border-box;
-      margin: 0 0 16px;
-      padding: 16px;
-      border: 1px dashed rgba(255, 255, 255, 0.25);
-      border-radius: 10px;
+    }
+
+    .step-card {
+      width: 100%;
+      min-width: 0;
+      padding: 22px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--panel);
+    }
+
+    .step-title {
+      margin: 0 0 14px;
+      font-size: 18px;
+      font-weight: 700;
+    }
+
+    .step-number {
+      color: var(--accent);
+    }
+
+    .step-help {
+      display: block;
+      margin-top: 12px;
+      color: var(--muted);
       font-size: 14px;
     }
 
-    .ref-picker label {
-      opacity: 0.85;
-    }
-
-    .ref-picker input[type="file"] {
+    #refInput {
       display: block;
       max-width: 100%;
-      font-size: 13px;
-      color: inherit;
+      color: var(--text);
     }
 
-    .ref-picker small {
-      display: block;
-      opacity: 0.65;
-      font-size: 12px;
-      line-height: 1.5;
+    #refInput::file-selector-button {
+      margin-right: 12px;
+      padding: 8px 12px;
+      border: 0;
+      border-radius: 6px;
+      background: #e5eff0;
+      color: #102b32;
+      cursor: pointer;
     }
 
-    /* Raw underwater image upload */
+    /* STEP 2 UPLOAD ZONE */
+
     #dropZone {
       display: block;
       width: 100%;
-      box-sizing: border-box;
+      min-height: 220px;
+      margin: 0;
+      padding: 28px;
+      border: 1px dashed rgba(121, 199, 206, 0.55);
+      border-radius: var(--radius);
+      background: var(--panel);
+      text-align: center;
+      transition: border-color 0.2s, background 0.2s;
+      cursor: pointer;
+    }
+
+    #dropZone.dragover {
+      border-color: var(--accent);
+      background: var(--panel-light);
+    }
+
+    #dropZone h3 {
+      margin: 0 0 16px;
+      font-size: 19px;
+    }
+
+    .upload-prompt {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      min-height: 120px;
+    }
+
+    .upload-prompt p {
+      margin: 0;
+      color: var(--muted);
+    }
+
+    .primary-btn,
+    .reset-btn {
+      display: inline-block;
+      padding: 11px 18px;
+      border: 0;
+      border-radius: 8px;
+      background: var(--accent);
+      color: #08242b;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .primary-btn:hover,
+    .reset-btn:hover {
+      filter: brightness(1.08);
+    }
+
+    .reset-btn {
       margin-top: 16px;
     }
 
-    #uploadPrompt {
+    /* INPUT AND DDPG OUTPUT BELOW STEP 2 */
+
+    #compareView {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 24px;
       width: 100%;
-      box-sizing: border-box;
+      padding: 24px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--panel);
     }
 
-    /* Training graphs */
+    #compareView[hidden] {
+      display: none !important;
+    }
+
+    .compare-image {
+      min-width: 0;
+    }
+
+    .compare-image h3 {
+      margin: 0 0 12px;
+      color: var(--accent);
+      font-size: 16px;
+      font-weight: 600;
+    }
+
+    .image-frame {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      min-height: 180px;
+      overflow: hidden;
+      border-radius: 8px;
+      background: #071820;
+    }
+
+    #imgBefore,
+    #imgAfter {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 480px;
+      object-fit: contain;
+    }
+
+    /* RESTORATION METRICS */
+
+    .metrics-card {
+      width: 100%;
+      padding: 24px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--panel);
+    }
+
+    .metrics-card h3 {
+      margin: 0 0 22px;
+      font-size: 20px;
+    }
+
+    .metric-row {
+      margin-bottom: 20px;
+    }
+
+    .metric-heading {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 8px;
+      font-size: 14px;
+    }
+
+    .metric-name {
+      font-weight: 600;
+    }
+
+    .metric-val {
+      color: var(--accent);
+      text-align: right;
+    }
+
+    .metric-track {
+      width: 100%;
+      height: 8px;
+      overflow: hidden;
+      border-radius: 20px;
+      background: #25444a;
+    }
+
+    .metric-fill {
+      width: 0%;
+      height: 100%;
+      border-radius: inherit;
+      background: var(--accent);
+      transition: width 0.6s ease;
+    }
+
+    .metrics-note {
+      margin: 18px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    /* GENERAL CONTENT CARDS */
+
+    .content-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 20px;
+    }
+
+    .content-card {
+      padding: 24px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--panel);
+    }
+
+    .content-card h3 {
+      margin-top: 0;
+      font-size: 18px;
+    }
+
+    .content-card p {
+      margin-bottom: 0;
+      color: var(--muted);
+    }
+
+    /* TRAINING RESULTS */
+
     .training-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 24px;
-      margin-top: 32px;
     }
 
     .training-card {
       min-width: 0;
       padding: 20px;
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      border-radius: 16px;
-      background: rgba(255, 255, 255, 0.025);
-    }
-
-    .training-card h3 {
-      margin: 0 0 16px;
-    }
-
-    .training-card img {
-      display: block;
-      width: 100%;
-      height: auto;
-      border-radius: 10px;
-      background: rgba(0, 0, 0, 0.15);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--panel);
     }
 
     .training-card-wide {
       grid-column: 1 / -1;
     }
 
-    .training-caption {
-      margin-top: 12px;
-      font-size: 13px;
-      line-height: 1.6;
-      opacity: 0.7;
+    .training-card h3 {
+      margin: 0 0 14px;
+      font-size: 17px;
     }
 
+    .training-card img {
+      display: block;
+      width: 100%;
+      height: auto;
+      border-radius: 8px;
+      background: #071820;
+    }
+
+    .training-caption,
     .training-status {
-      margin-top: 24px;
-      padding: 16px;
-      border-radius: 12px;
-      border: 1px solid rgba(63, 216, 200, 0.25);
-      font-size: 14px;
-      line-height: 1.7;
+      color: var(--muted);
+      font-size: 13px;
     }
 
-    @media (max-width: 700px) {
+    /* TEAM */
+
+    .team-box {
+      padding: 28px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--panel);
+    }
+
+    .team-box p {
+      margin-bottom: 0;
+      color: var(--muted);
+    }
+
+    /* FOOTER */
+
+    footer {
+      padding: 28px 0;
+      border-top: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .footer-inner {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    @media (max-width: 760px) {
+      .nav {
+        align-items: flex-start;
+        flex-direction: column;
+        justify-content: center;
+        padding: 14px 0;
+        gap: 12px;
+      }
+
+      .nav-links {
+        gap: 16px;
+        flex-wrap: wrap;
+        font-size: 13px;
+      }
+
+      section {
+        padding: 54px 0;
+      }
+
+      .hero {
+        padding: 64px 0 48px;
+      }
+
+      #compareView,
+      .content-grid,
       .training-grid {
         grid-template-columns: 1fr;
       }
@@ -113,20 +535,43 @@
       .training-card-wide {
         grid-column: auto;
       }
+
+      #dropZone {
+        padding: 20px;
+      }
+
+      .step-card,
+      .metrics-card,
+      #compareView {
+        padding: 18px;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html {
+        scroll-behavior: auto;
+      }
+
+      *,
+      *::before,
+      *::after {
+        transition-duration: 0.01ms !important;
+      }
     }
   </style>
 </head>
 
 <body>
 
-  <!-- Navigation -->
-  <header class="topbar">
-    <div class="wrap topbar-inner">
-      <span class="brand">DeepSea Restore</span>
-      <nav class="topnav">
+  <!-- NAVIGATION -->
+  <header class="site-header">
+    <div class="container nav">
+      <a class="brand" href="#home">DeepSea Restore</a>
+
+      <nav class="nav-links" aria-label="Main navigation">
         <a href="#demo">Demo</a>
         <a href="#method">Method</a>
-        <a href="#metrics">Metrics</a>
+        <a href="#metrics-info">Metrics</a>
         <a href="#training">Training Results</a>
         <a href="#team">Team split</a>
       </nav>
@@ -135,326 +580,413 @@
 
   <main>
 
-    <!-- Hero -->
-    <section class="hero">
-      <svg class="hero-waves" viewBox="0 0 1200 140" preserveAspectRatio="none" aria-hidden="true">
-        <path d="M0,80 C200,20 350,120 600,70 C850,20 1000,120 1200,60 L1200,140 L0,140 Z" fill="url(#waveGrad)"/>
-        <defs>
-          <linearGradient id="waveGrad" x1="0" y1="0" x2="1" y2="0">
-            <stop offset="0%" stop-color="#3FD8C8" stop-opacity="0.18"/>
-            <stop offset="100%" stop-color="#E8935E" stop-opacity="0.12"/>
-          </linearGradient>
-        </defs>
-      </svg>
+    <!-- HERO -->
+    <section class="hero" id="home">
+      <div class="container">
+        <div class="eyebrow">Underwater image enhancement</div>
 
-      <div class="wrap hero-inner">
-        <p class="eyebrow">Reinforcement learning · Image restoration</p>
-        <h1>Teaching an agent to see clearly<br>through murky water.</h1>
+        <h1>Bring underwater images back to life.</h1>
 
-        <p class="hero-sub">
-          A DDPG policy learns which corrections can recover color and contrast
-          in underwater photos affected by light scattering and color casts,
-          using the UIEB benchmark dataset.
+        <p>
+          DeepSea Restore uses a trained Deep Deterministic Policy Gradient
+          (DDPG) model to improve underwater images and help reveal details
+          affected by color distortion, haze, and poor visibility.
         </p>
 
-        <div class="hero-stats">
-          <div><strong>DDPG</strong><span>This build's agent</span></div>
-          <div><strong>UIEB</strong><span>Benchmark dataset</span></div>
-          <div><strong>4</strong><span>Core image metrics</span></div>
-        </div>
+        <a class="hero-link" href="#demo">Try image restoration</a>
       </div>
     </section>
 
-    <!-- Restoration Demo -->
-    <section id="demo" class="section demo">
-      <div class="wrap">
-        <h2>Try a restoration</h2>
+    <!-- RESTORATION DEMO -->
+    <section class="demo-section" id="demo">
+      <div class="container">
 
-        <p class="section-lede">
-          Upload an underwater photo. The trained DDPG model processes it
-          through the backend and returns a restored result and available metrics.
-        </p>
+        <div class="demo-heading">
+          <div class="eyebrow">Interactive demonstration</div>
 
-        <div class="demo-panel">
+          <h2 class="section-title">Try a restoration</h2>
 
-          <!-- 1. Reference image upload -->
-          <div class="ref-picker">
-            <label for="refInput">
-              <strong>Step 1 — Optional reference image</strong>
-              (enables PSNR and SSIM)
-            </label>
+          <p class="section-description">
+            Upload an optional clean reference image first, then upload
+            the underwater image. The trained DDPG model processes the
+            underwater image through the backend and returns a restored
+            result with available metrics.
+          </p>
+        </div>
 
-            <input type="file" id="refInput" accept="image/*">
+        <div class="restoration-layout">
 
-            <small>
-              Select a clean reference image of the same scene. This is optional.
+          <!-- STEP 1 -->
+          <div class="step-card ref-picker">
+            <h3 class="step-title">
+              <span class="step-number">Step 1 —</span>
+              Choose reference image
+              <span style="color: var(--muted); font-weight: 400;">
+                (optional)
+              </span>
+            </h3>
+
+            <input
+              type="file"
+              id="refInput"
+              accept="image/*"
+              aria-label="Choose optional reference image"
+            >
+
+            <small class="step-help">
+              Select a clean reference image of the same scene.
+              A reference image can enable PSNR and SSIM calculations.
               Upload it before selecting the underwater image below.
             </small>
           </div>
 
-          <!-- 2. Raw underwater image upload: below reference upload -->
-          <div class="upload-zone" id="dropZone">
-            <input type="file" id="fileInput" accept="image/*" hidden>
+          <!-- STEP 2 -->
+          <div class="step-card">
+            <h3 class="step-title">
+              <span class="step-number">Step 2 —</span>
+              Upload underwater image
+            </h3>
 
-            <div id="uploadPrompt" class="upload-prompt">
-              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
-                <path d="M12 3v12m0-12l-4 4m4-4l4 4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/>
-              </svg>
+            <div
+              class="upload-zone"
+              id="dropZone"
+              role="button"
+              tabindex="0"
+              aria-label="Upload an underwater image"
+            >
+              <input
+                type="file"
+                id="fileInput"
+                accept="image/*"
+                hidden
+              >
 
-              <p>
-                <strong>Step 2 — Upload underwater image</strong><br>
-                Drag an image here, or
-                <button type="button" id="browseBtn">browse</button>
-              </p>
+              <div id="uploadPrompt" class="upload-prompt">
+                <p>
+                  Choose an underwater photo to restore.
+                </p>
 
-              <p class="hint">
-                JPG or PNG. This image will be processed by the DeepSea Restore model.
-              </p>
-            </div>
+                <button
+                  type="button"
+                  id="browseBtn"
+                  class="primary-btn"
+                >
+                  Browse image
+                </button>
 
-            <!-- Before and after comparison -->
-            <div id="compareView" class="compare-view" hidden>
-              <div class="compare-col">
-                <span class="compare-label">Input</span>
-                <img id="imgBefore" alt="Original underwater photo">
-              </div>
-
-              <div class="compare-col">
-                <span class="compare-label">DDPG output</span>
-                <canvas id="imgAfter"></canvas>
+                <small class="step-help">
+                  You can also drag and drop an image here.
+                </small>
               </div>
             </div>
           </div>
 
-          <!-- Restoration metrics -->
-          <div class="metrics-panel">
-            <p class="metrics-title">Restoration scores</p>
+          <!-- INPUT AND OUTPUT: BELOW STEP 2 -->
+          <div
+            id="compareView"
+            class="compare-view"
+            hidden
+            aria-live="polite"
+          >
 
-            <div class="metric-row" data-metric="psnr">
-              <span class="metric-name">PSNR</span>
-              <span class="metric-bar"><span class="metric-fill"></span></span>
-              <span class="metric-val">—</span>
+            <div class="compare-image">
+              <h3>Input Image</h3>
+
+              <div class="image-frame">
+                <img
+                  id="imgBefore"
+                  alt="Original underwater input image"
+                >
+              </div>
             </div>
 
-            <div class="metric-row" data-metric="ssim">
-              <span class="metric-name">SSIM</span>
-              <span class="metric-bar"><span class="metric-fill"></span></span>
-              <span class="metric-val">—</span>
+            <div class="compare-image">
+              <h3>DDPG Output</h3>
+
+              <div class="image-frame">
+                <canvas
+                  id="imgAfter"
+                  aria-label="Restored underwater image"
+                ></canvas>
+              </div>
             </div>
 
-            <div class="metric-row" data-metric="uiqm">
-              <span class="metric-name">UIQM</span>
-              <span class="metric-bar"><span class="metric-fill"></span></span>
-              <span class="metric-val">—</span>
-            </div>
+          </div>
 
-            <div class="metric-row" data-metric="uciqe">
-              <span class="metric-name">UCIQE</span>
-              <span class="metric-bar"><span class="metric-fill"></span></span>
-              <span class="metric-val">—</span>
-            </div>
-
-            <p class="metrics-note">
-              UIQM and UCIQE are computed without a reference image.
-              PSNR and SSIM require a matching reference image.
-            </p>
-
-            <button id="resetBtn" class="reset-btn" hidden>
-              Try another image
+          <!-- STATUS AND RESET -->
+          <div class="demo-controls">
+            <button
+              type="button"
+              id="resetBtn"
+              class="reset-btn"
+              hidden
+            >
+              Reset demo
             </button>
           </div>
 
+          <!-- METRICS: BELOW THE COMPARISON -->
+          <div class="metrics-card">
+            <h3>Restoration scores</h3>
+
+            <div class="metric-row metric-row-psnr"
+                 data-metric="psnr">
+              <div class="metric-heading">
+                <span class="metric-name">PSNR</span>
+                <span class="metric-val">—</span>
+              </div>
+
+              <div class="metric-track">
+                <div class="metric-fill"></div>
+              </div>
+            </div>
+
+            <div class="metric-row metric-row-ssim"
+                 data-metric="ssim">
+              <div class="metric-heading">
+                <span class="metric-name">SSIM</span>
+                <span class="metric-val">—</span>
+              </div>
+
+              <div class="metric-track">
+                <div class="metric-fill"></div>
+              </div>
+            </div>
+
+            <div class="metric-row metric-row-uiqm"
+                 data-metric="uiqm">
+              <div class="metric-heading">
+                <span class="metric-name">UIQM</span>
+                <span class="metric-val">—</span>
+              </div>
+
+              <div class="metric-track">
+                <div class="metric-fill"></div>
+              </div>
+            </div>
+
+            <div class="metric-row metric-row-uciqe"
+                 data-metric="uciqe">
+              <div class="metric-heading">
+                <span class="metric-name">UCIQE</span>
+                <span class="metric-val">—</span>
+              </div>
+
+              <div class="metric-track">
+                <div class="metric-fill"></div>
+              </div>
+            </div>
+
+            <p class="metrics-note">
+              PSNR and SSIM require a suitable reference image.
+              UIQM and UCIQE are no-reference image quality metrics.
+              Scores are calculated by the backend when available.
+            </p>
+          </div>
+
         </div>
       </div>
     </section>
 
-    <!-- Method -->
-    <section id="method" class="section method">
-      <div class="wrap">
-        <h2>How the agent works</h2>
+    <!-- METHOD -->
+    <section id="method">
+      <div class="container">
+        <div class="eyebrow">How it works</div>
 
-        <div class="method-grid">
-          <div class="method-card">
-            <span class="method-index">State</span>
-            <p>
-              Each degraded UIEB image is represented by an observation
-              that the policy uses to decide how to enhance it.
-            </p>
-          </div>
+        <h2 class="section-title">Restoration method</h2>
 
-          <div class="method-card">
-            <span class="method-index">Action</span>
-            <p>
-              DDPG outputs a continuous correction vector controlling red,
-              green and blue gains, gamma, contrast, saturation and
-              local-contrast strength.
-            </p>
-          </div>
-
-          <div class="method-card">
-            <span class="method-index">Reward</span>
-            <p>
-              The environment scores the corrected image using the implemented
-              quality metrics and color-cast measurement. The reward guides learning.
-            </p>
-          </div>
-
-          <div class="method-card">
-            <span class="method-index">Policy</span>
-            <p>
-              An actor-critic pair learns a correction policy over training episodes.
-              Validation results help identify a promising checkpoint.
-            </p>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- Metric explanations -->
-    <section id="metrics" class="section metrics-explainer">
-      <div class="wrap">
-        <h2>Why these four metrics</h2>
-
-        <p class="section-lede">
-          The project tracks reference-based fidelity and no-reference
-          underwater image quality.
+        <p class="section-description">
+          The application sends the uploaded image to the backend,
+          where the trained model generates a restored image.
         </p>
 
-        <dl class="metric-defs">
-          <div>
-            <dt>PSNR</dt>
-            <dd>
-              Pixel-level fidelity to a reference image, measured in decibels.
-              Higher values generally indicate lower pixel error.
-            </dd>
-          </div>
+        <div class="content-grid">
+          <article class="content-card">
+            <h3>01. Image input</h3>
+            <p>
+              An underwater image is selected by the user and submitted
+              to the restoration API.
+            </p>
+          </article>
 
-          <div>
-            <dt>SSIM</dt>
-            <dd>
-              Structural similarity to a reference image, considering
-              luminance, contrast and structure.
-            </dd>
-          </div>
+          <article class="content-card">
+            <h3>02. DDPG restoration</h3>
+            <p>
+              The backend uses the available trained DDPG model to
+              process the input image.
+            </p>
+          </article>
 
-          <div>
-            <dt>UIQM</dt>
-            <dd>
-              Underwater Image Quality Measure, a no-reference measure
-              combining colorfulness, sharpness and contrast.
-            </dd>
-          </div>
-
-          <div>
-            <dt>UCIQE</dt>
-            <dd>
-              Underwater Color Image Quality Evaluation, a no-reference
-              measure based on underwater color and luminance characteristics.
-            </dd>
-          </div>
-        </dl>
+          <article class="content-card">
+            <h3>03. Evaluation</h3>
+            <p>
+              The restored image and available quality metrics are
+              returned to the website for inspection.
+            </p>
+          </article>
+        </div>
       </div>
     </section>
 
-    <!-- Training Results -->
-    <section id="training" class="section training-results">
-      <div class="wrap">
-        <h2>DDPG Training Results</h2>
+    <!-- METRIC EXPLANATIONS -->
+    <section id="metrics-info">
+      <div class="container">
+        <div class="eyebrow">Image quality evaluation</div>
 
-        <p class="section-lede">
-          Explore the training metrics, PSNR trend and reward curve
-          generated from the DDPG training run.
+        <h2 class="section-title">Understanding the metrics</h2>
+
+        <p class="section-description">
+          Different metrics assess different aspects of image quality.
+          They should be interpreted together rather than treated as
+          interchangeable measurements.
+        </p>
+
+        <div class="content-grid">
+          <article class="content-card">
+            <h3>PSNR</h3>
+            <p>
+              Peak Signal-to-Noise Ratio measures pixel-level
+              reconstruction error relative to a reference image.
+              Higher values generally indicate lower reconstruction error.
+            </p>
+          </article>
+
+          <article class="content-card">
+            <h3>SSIM</h3>
+            <p>
+              Structural Similarity compares luminance, contrast,
+              and structural information between an image and
+              its reference.
+            </p>
+          </article>
+
+          <article class="content-card">
+            <h3>UIQM and UCIQE</h3>
+            <p>
+              These no-reference metrics estimate aspects of underwater
+              image quality without requiring a clean reference image.
+              Their scores do not necessarily prove that an image is
+              perceptually better in every situation.
+            </p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- TRAINING RESULTS -->
+    <section id="training">
+      <div class="container">
+        <div class="eyebrow">Model evaluation</div>
+
+        <h2 class="section-title">Training Results</h2>
+
+        <p class="section-description">
+          Training plots can be displayed here to show model learning
+          progress and evaluation trends across episodes.
         </p>
 
         <div class="training-grid">
-          <div class="training-card training-card-wide">
-            <h3>Training Metric Curves</h3>
-            <img src="/figures/metric_curve.png" alt="Training metrics plotted across episodes" loading="lazy">
-            <p class="training-caption">
-              Metric trends recorded in the training log.
-            </p>
-          </div>
 
-          <div class="training-card">
+          <article class="training-card">
             <h3>PSNR vs Episodes</h3>
-            <img src="/figures/psnr_vs_episodes.png" alt="PSNR measurements across training episodes" loading="lazy">
-            <p class="training-caption">
-              PSNR measurements recorded by the plotting script.
-            </p>
-          </div>
 
-          <div class="training-card">
+            <img
+              src="figures/psnr_vs_episodes.png"
+              alt="PSNR versus training episodes"
+              loading="lazy"
+              onerror="this.style.display='none';"
+            >
+
+            <p class="training-caption">
+              Peak Signal-to-Noise Ratio across training episodes.
+            </p>
+          </article>
+
+          <article class="training-card">
             <h3>Reward Curve</h3>
-            <img src="/figures/reward_curve.png" alt="DDPG average reward across training episodes" loading="lazy">
+
+            <img
+              src="figures/reward_curve.png"
+              alt="DDPG reward curve across training episodes"
+              loading="lazy"
+              onerror="this.style.display='none';"
+            >
+
             <p class="training-caption">
-              Average reward values available in the training log.
+              Reward trends during model training.
             </p>
-          </div>
+          </article>
+
+          <article class="training-card training-card-wide">
+            <h3>Evaluation Metrics</h3>
+
+            <img
+              src="figures/metric_curve.png"
+              alt="Image quality metric trends during training"
+              loading="lazy"
+              onerror="this.style.display='none';"
+            >
+
+            <p class="training-caption">
+              Available image quality metrics recorded during training.
+            </p>
+          </article>
+
         </div>
 
-        <div class="training-status">
-          <strong>Training log</strong>
-          <p>
-            These plots reflect the training log used to generate them.
-            Regenerate the plots after additional training and replace the
-            images in the frontend's public/figures folder to update the results.
-          </p>
-        </div>
+        <p class="training-status">
+          Training charts must be generated by your training pipeline
+          and included in the frontend deployment.
+        </p>
       </div>
     </section>
 
-    <!-- Team split -->
-    <section id="team" class="section team">
-      <div class="wrap">
-        <h2>Team split</h2>
+    <!-- TEAM -->
+    <section id="team">
+      <div class="container">
+        <div class="eyebrow">Project information</div>
 
-        <p class="section-lede">
-          Shared problem statement, dataset and metrics, with different
-          restoration algorithms implemented by team members.
-        </p>
+        <h2 class="section-title">Team split</h2>
 
-        <div class="team-grid">
-          <div class="team-card active">
-            <span class="team-tag">This build</span>
-            <h3>DDPG</h3>
-            <p>
-              Deep Deterministic Policy Gradient: a continuous-action
-              actor-critic restoration policy.
-            </p>
-          </div>
+        <div class="team-box">
+          <h3>DeepSea Restore</h3>
 
-          <div class="team-card">
-            <span class="team-tag">Teammate</span>
-            <h3>Algorithm 2</h3>
-            <p>Replace this description with the teammate's method.</p>
-          </div>
-
-          <div class="team-card">
-            <span class="team-tag">Teammate</span>
-            <h3>Algorithm 3</h3>
-            <p>Replace this description with the teammate's method.</p>
-          </div>
-
-          <div class="team-card">
-            <span class="team-tag">Teammate</span>
-            <h3>Algorithm 4</h3>
-            <p>Replace this description with the teammate's method.</p>
-          </div>
+          <p>
+            This project combines reinforcement learning, underwater
+            image processing, model evaluation, and web application
+            development to explore underwater image restoration.
+          </p>
         </div>
       </div>
     </section>
 
   </main>
 
-  <!-- Footer -->
-  <footer class="site-footer">
-    <div class="wrap">
-      Reinforcement Learning-Based Underwater Image Restoration · UIEB benchmark
+  <!-- FOOTER -->
+  <footer>
+    <div class="container footer-inner">
+      <span>DeepSea Restore</span>
+      <span>Underwater Image Restoration using DDPG</span>
     </div>
   </footer>
 
-  <!-- Existing restoration functionality -->
+  <!-- Keep your existing restoration JavaScript -->
   <script src="script.js"></script>
+
+  <!-- Keyboard accessibility for the upload area -->
+  <script>
+    const uploadZone = document.getElementById("dropZone");
+
+    uploadZone.addEventListener("keydown", function (event) {
+      if (
+        event.target === uploadZone &&
+        (event.key === "Enter" || event.key === " ")
+      ) {
+        event.preventDefault();
+        document.getElementById("fileInput").click();
+      }
+    });
+  </script>
 
 </body>
 </html>
