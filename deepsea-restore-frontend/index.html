@@ -1,33 +1,29 @@
-```html
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
   <title>DeepSea Restore — RL-Based Underwater Image Restoration</title>
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-
-  <link
-    href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap"
-    rel="stylesheet"
-  >
-
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 
   <style>
+    /* Reference upload: always above the raw image upload */
     .ref-picker {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 10px;
+      width: 100%;
+      box-sizing: border-box;
       margin: 0 0 16px;
-      padding: 12px 16px;
+      padding: 16px;
       border: 1px dashed rgba(255, 255, 255, 0.25);
       border-radius: 10px;
       font-size: 14px;
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      gap: 10px 16px;
     }
 
     .ref-picker label {
@@ -35,18 +31,33 @@
     }
 
     .ref-picker input[type="file"] {
+      display: block;
+      max-width: 100%;
       font-size: 13px;
       color: inherit;
-      max-width: 100%;
     }
 
     .ref-picker small {
-      flex-basis: 100%;
-      opacity: 0.6;
+      display: block;
+      opacity: 0.65;
       font-size: 12px;
+      line-height: 1.5;
     }
 
-    /* Training results */
+    /* Raw underwater image upload */
+    #dropZone {
+      display: block;
+      width: 100%;
+      box-sizing: border-box;
+      margin-top: 16px;
+    }
+
+    #uploadPrompt {
+      width: 100%;
+      box-sizing: border-box;
+    }
+
+    /* Training graphs */
     .training-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -112,7 +123,6 @@
   <header class="topbar">
     <div class="wrap topbar-inner">
       <span class="brand">DeepSea Restore</span>
-
       <nav class="topnav">
         <a href="#demo">Demo</a>
         <a href="#method">Method</a>
@@ -127,17 +137,8 @@
 
     <!-- Hero -->
     <section class="hero">
-      <svg
-        class="hero-waves"
-        viewBox="0 0 1200 140"
-        preserveAspectRatio="none"
-        aria-hidden="true"
-      >
-        <path
-          d="M0,80 C200,20 350,120 600,70 C850,20 1000,120 1200,60 L1200,140 L0,140 Z"
-          fill="url(#waveGrad)"
-        />
-
+      <svg class="hero-waves" viewBox="0 0 1200 140" preserveAspectRatio="none" aria-hidden="true">
+        <path d="M0,80 C200,20 350,120 600,70 C850,20 1000,120 1200,60 L1200,140 L0,140 Z" fill="url(#waveGrad)"/>
         <defs>
           <linearGradient id="waveGrad" x1="0" y1="0" x2="1" y2="0">
             <stop offset="0%" stop-color="#3FD8C8" stop-opacity="0.18"/>
@@ -147,36 +148,19 @@
       </svg>
 
       <div class="wrap hero-inner">
-        <p class="eyebrow">
-          Reinforcement learning · Image restoration
-        </p>
-
-        <h1>
-          Teaching an agent to see clearly<br>
-          through murky water.
-        </h1>
+        <p class="eyebrow">Reinforcement learning · Image restoration</p>
+        <h1>Teaching an agent to see clearly<br>through murky water.</h1>
 
         <p class="hero-sub">
-          A DDPG policy learns which corrections can recover color and
-          contrast in underwater photos affected by light scattering and
-          color casts, using the UIEB benchmark dataset.
+          A DDPG policy learns which corrections can recover color and contrast
+          in underwater photos affected by light scattering and color casts,
+          using the UIEB benchmark dataset.
         </p>
 
         <div class="hero-stats">
-          <div>
-            <strong>DDPG</strong>
-            <span>This build's agent</span>
-          </div>
-
-          <div>
-            <strong>UIEB</strong>
-            <span>Benchmark dataset</span>
-          </div>
-
-          <div>
-            <strong>4</strong>
-            <span>Core image metrics</span>
-          </div>
+          <div><strong>DDPG</strong><span>This build's agent</span></div>
+          <div><strong>UIEB</strong><span>Benchmark dataset</span></div>
+          <div><strong>4</strong><span>Core image metrics</span></div>
         </div>
       </div>
     </section>
@@ -184,56 +168,47 @@
     <!-- Restoration Demo -->
     <section id="demo" class="section demo">
       <div class="wrap">
-
         <h2>Try a restoration</h2>
 
         <p class="section-lede">
-          Upload an underwater photo. The trained DDPG model processes
-          it through the backend and returns a restored result and
-          available evaluation metrics.
+          Upload an underwater photo. The trained DDPG model processes it
+          through the backend and returns a restored result and available metrics.
         </p>
 
         <div class="demo-panel">
 
-          <!-- Optional reference image -->
+          <!-- 1. Reference image upload -->
           <div class="ref-picker">
             <label for="refInput">
-              Optional: reference image (enables PSNR and SSIM)
+              <strong>Step 1 — Optional reference image</strong>
+              (enables PSNR and SSIM)
             </label>
 
             <input type="file" id="refInput" accept="image/*">
 
             <small>
-              Choose the reference image first, then upload the underwater
-              photo. Both images must show the same scene.
+              Select a clean reference image of the same scene. This is optional.
+              Upload it before selecting the underwater image below.
             </small>
           </div>
 
-          <!-- Upload area -->
+          <!-- 2. Raw underwater image upload: below reference upload -->
           <div class="upload-zone" id="dropZone">
-
             <input type="file" id="fileInput" accept="image/*" hidden>
 
             <div id="uploadPrompt" class="upload-prompt">
-              <svg
-                width="36"
-                height="36"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.4"
-                aria-hidden="true"
-              >
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
                 <path d="M12 3v12m0-12l-4 4m4-4l4 4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/>
               </svg>
 
               <p>
+                <strong>Step 2 — Upload underwater image</strong><br>
                 Drag an image here, or
                 <button type="button" id="browseBtn">browse</button>
               </p>
 
               <p class="hint">
-                JPG or PNG. Your image is processed by the DeepSea Restore model.
+                JPG or PNG. This image will be processed by the DeepSea Restore model.
               </p>
             </div>
 
@@ -249,7 +224,6 @@
                 <canvas id="imgAfter"></canvas>
               </div>
             </div>
-
           </div>
 
           <!-- Restoration metrics -->
@@ -258,33 +232,25 @@
 
             <div class="metric-row" data-metric="psnr">
               <span class="metric-name">PSNR</span>
-              <span class="metric-bar">
-                <span class="metric-fill"></span>
-              </span>
+              <span class="metric-bar"><span class="metric-fill"></span></span>
               <span class="metric-val">—</span>
             </div>
 
             <div class="metric-row" data-metric="ssim">
               <span class="metric-name">SSIM</span>
-              <span class="metric-bar">
-                <span class="metric-fill"></span>
-              </span>
+              <span class="metric-bar"><span class="metric-fill"></span></span>
               <span class="metric-val">—</span>
             </div>
 
             <div class="metric-row" data-metric="uiqm">
               <span class="metric-name">UIQM</span>
-              <span class="metric-bar">
-                <span class="metric-fill"></span>
-              </span>
+              <span class="metric-bar"><span class="metric-fill"></span></span>
               <span class="metric-val">—</span>
             </div>
 
             <div class="metric-row" data-metric="uciqe">
               <span class="metric-name">UCIQE</span>
-              <span class="metric-bar">
-                <span class="metric-fill"></span>
-              </span>
+              <span class="metric-bar"><span class="metric-fill"></span></span>
               <span class="metric-val">—</span>
             </div>
 
@@ -305,11 +271,9 @@
     <!-- Method -->
     <section id="method" class="section method">
       <div class="wrap">
-
         <h2>How the agent works</h2>
 
         <div class="method-grid">
-
           <div class="method-card">
             <span class="method-index">State</span>
             <p>
@@ -330,21 +294,18 @@
           <div class="method-card">
             <span class="method-index">Reward</span>
             <p>
-              The environment scores the corrected image using the
-              implemented quality metrics and color-cast measurement.
-              The reward guides the agent's learning.
+              The environment scores the corrected image using the implemented
+              quality metrics and color-cast measurement. The reward guides learning.
             </p>
           </div>
 
           <div class="method-card">
             <span class="method-index">Policy</span>
             <p>
-              An actor-critic pair learns a correction policy over training
-              episodes. Validation results help identify a promising
-              checkpoint.
+              An actor-critic pair learns a correction policy over training episodes.
+              Validation results help identify a promising checkpoint.
             </p>
           </div>
-
         </div>
       </div>
     </section>
@@ -352,7 +313,6 @@
     <!-- Metric explanations -->
     <section id="metrics" class="section metrics-explainer">
       <div class="wrap">
-
         <h2>Why these four metrics</h2>
 
         <p class="section-lede">
@@ -361,12 +321,11 @@
         </p>
 
         <dl class="metric-defs">
-
           <div>
             <dt>PSNR</dt>
             <dd>
-              Pixel-level fidelity to a reference image, measured in
-              decibels. Higher values generally indicate lower pixel error.
+              Pixel-level fidelity to a reference image, measured in decibels.
+              Higher values generally indicate lower pixel error.
             </dd>
           </div>
 
@@ -393,15 +352,13 @@
               measure based on underwater color and luminance characteristics.
             </dd>
           </div>
-
         </dl>
       </div>
     </section>
 
-    <!-- NEW: Training Results -->
+    <!-- Training Results -->
     <section id="training" class="section training-results">
       <div class="wrap">
-
         <h2>DDPG Training Results</h2>
 
         <p class="section-lede">
@@ -410,69 +367,45 @@
         </p>
 
         <div class="training-grid">
-
           <div class="training-card training-card-wide">
             <h3>Training Metric Curves</h3>
-
-            <img
-              src="/figures/metric_curve.png"
-              alt="Training metrics plotted across episodes"
-              loading="lazy"
-            >
-
+            <img src="/figures/metric_curve.png" alt="Training metrics plotted across episodes" loading="lazy">
             <p class="training-caption">
-              Metric trends recorded in the training log. Check the
-              graph labels to see which metrics are plotted.
+              Metric trends recorded in the training log.
             </p>
           </div>
 
           <div class="training-card">
             <h3>PSNR vs Episodes</h3>
-
-            <img
-              src="/figures/psnr_vs_episodes.png"
-              alt="PSNR measurements across training episodes"
-              loading="lazy"
-            >
-
+            <img src="/figures/psnr_vs_episodes.png" alt="PSNR measurements across training episodes" loading="lazy">
             <p class="training-caption">
-              Shows the PSNR measurements recorded by the plotting script.
+              PSNR measurements recorded by the plotting script.
             </p>
           </div>
 
           <div class="training-card">
             <h3>Reward Curve</h3>
-
-            <img
-              src="/figures/reward_curve.png"
-              alt="DDPG average reward across training episodes"
-              loading="lazy"
-            >
-
+            <img src="/figures/reward_curve.png" alt="DDPG average reward across training episodes" loading="lazy">
             <p class="training-caption">
-              Shows the average reward values available in the training log.
+              Average reward values available in the training log.
             </p>
           </div>
-
         </div>
 
         <div class="training-status">
-          <strong>Training log:</strong>
+          <strong>Training log</strong>
           <p>
-            The current plots represent the log used to generate them.
-            To show newer results after additional training, regenerate
-            the plots and replace the images in the frontend's public
-            figures folder.
+            These plots reflect the training log used to generate them.
+            Regenerate the plots after additional training and replace the
+            images in the frontend's public/figures folder to update the results.
           </p>
         </div>
-
       </div>
     </section>
 
     <!-- Team split -->
     <section id="team" class="section team">
       <div class="wrap">
-
         <h2>Team split</h2>
 
         <p class="section-lede">
@@ -481,7 +414,6 @@
         </p>
 
         <div class="team-grid">
-
           <div class="team-card active">
             <span class="team-tag">This build</span>
             <h3>DDPG</h3>
@@ -508,7 +440,6 @@
             <h3>Algorithm 4</h3>
             <p>Replace this description with the teammate's method.</p>
           </div>
-
         </div>
       </div>
     </section>
@@ -522,7 +453,7 @@
     </div>
   </footer>
 
-  <!-- Keep your existing restoration JavaScript -->
+  <!-- Existing restoration functionality -->
   <script src="script.js"></script>
 
 </body>
