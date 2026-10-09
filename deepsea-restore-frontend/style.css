@@ -88,7 +88,7 @@ p {
   margin: 0 0 18px;
 }
 
-/* TOP NAVIGATION */
+/* NAVIGATION */
 
 .topbar,
 .site-header {
@@ -121,6 +121,7 @@ p {
 .nav-links {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 26px;
   font-size: 0.95rem;
 }
@@ -173,6 +174,7 @@ p {
 
 .hero-stats {
   display: flex;
+  flex-wrap: wrap;
   gap: 40px;
   border-top: 1px solid var(--line);
   padding-top: 24px;
@@ -188,17 +190,6 @@ p {
 .hero-stats span {
   font-size: 0.85rem;
   color: var(--muted);
-}
-
-.hero-link {
-  display: inline-block;
-  margin-top: 18px;
-  padding: 12px 20px;
-  border-radius: 6px;
-  background: var(--aqua);
-  color: var(--navy);
-  text-decoration: none;
-  font-weight: 700;
 }
 
 /* SECTIONS */
@@ -230,37 +221,29 @@ p {
   font-size: 1.05rem;
 }
 
-/* DEMO LAYOUT */
+/* DEMO: VERTICAL STEP LAYOUT */
 
-/*
-  The restoration interface must be vertical:
-  Step 1 -> Step 2 -> Input/Output -> Scores.
-*/
-
-.demo-panel {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 24px;
-  width: 100%;
-}
-
+.demo-panel,
 .restoration-layout {
   display: flex;
   flex-direction: column;
   align-items: stretch;
   gap: 24px;
   width: 100%;
+  min-width: 0;
 }
 
-.step-card,
-.ref-picker {
+/* STEP 1: REFERENCE IMAGE */
+
+.ref-picker,
+.step-card {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 12px;
   width: 100%;
   min-width: 0;
+  margin: 0;
   padding: 22px;
   background: var(--surface);
   border: 1px solid var(--line);
@@ -296,7 +279,8 @@ p {
   font-size: 0.9rem;
 }
 
-#refInput::file-selector-button {
+#refInput::file-selector-button,
+#fileInput::file-selector-button {
   margin-right: 12px;
   padding: 8px 12px;
   border: 1px solid var(--line);
@@ -306,11 +290,12 @@ p {
   cursor: pointer;
 }
 
-#refInput::file-selector-button:hover {
+#refInput::file-selector-button:hover,
+#fileInput::file-selector-button:hover {
   border-color: var(--aqua);
 }
 
-/* STEP 2: UNDERWATER IMAGE UPLOAD */
+/* STEP 2: UPLOAD UNDERWATER IMAGE */
 
 .upload-zone,
 #dropZone {
@@ -328,9 +313,7 @@ p {
   border-radius: 8px;
   background: var(--surface);
   text-align: center;
-  transition:
-    border-color 0.2s,
-    background 0.2s;
+  transition: border-color 0.2s, background 0.2s;
   cursor: pointer;
 }
 
@@ -340,20 +323,24 @@ p {
   background: var(--surface-2);
 }
 
-#dropZone h3 {
-  margin: 0 0 16px;
-  font-family: 'Inter', system-ui, sans-serif;
-  font-size: 1.1rem;
-  font-weight: 700;
+/* IMPORTANT: keep hidden elements hidden */
+#dropZone[hidden],
+#uploadPrompt[hidden],
+#compareView[hidden] {
+  display: none !important;
 }
 
-.upload-prompt {
+/* Upload prompt */
+
+.upload-prompt,
+#uploadPrompt {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 12px;
   width: 100%;
+  min-width: 0;
   color: var(--muted);
   text-align: center;
 }
@@ -373,7 +360,7 @@ p {
   opacity: 0.85;
 }
 
-/* Buttons */
+/* Browse button */
 
 #browseBtn,
 .primary-btn {
@@ -393,6 +380,8 @@ p {
   filter: brightness(1.08);
 }
 
+/* RESET BUTTON */
+
 .reset-btn {
   display: inline-block;
   margin-top: 16px;
@@ -411,12 +400,7 @@ p {
   color: var(--aqua);
 }
 
-/* INPUT AND OUTPUT COMPARISON */
-
-/*
-  Keep comparison underneath the upload area.
-  Use the IDs required by script.js.
-*/
+/* INPUT AND DDPG OUTPUT */
 
 .compare-view,
 #compareView {
@@ -431,10 +415,6 @@ p {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface);
-}
-
-#compareView[hidden] {
-  display: none !important;
 }
 
 .compare-col,
@@ -457,18 +437,6 @@ p {
   font-size: 1rem;
   font-weight: 600;
   color: var(--aqua);
-}
-
-.image-frame {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  min-width: 0;
-  min-height: 150px;
-  overflow: hidden;
-  border-radius: 6px;
-  background: #06151c;
 }
 
 .compare-view img,
@@ -507,13 +475,7 @@ p {
   color: var(--ink);
 }
 
-/*
-  Fix overlapping values and progress bars.
-
-  Each metric has:
-  1. A label and value on the first row.
-  2. A full-width progress bar below.
-*/
+/* Each metric has a heading above its progress bar */
 
 .metric-row {
   display: grid;
@@ -526,8 +488,7 @@ p {
   font-size: 0.9rem;
 }
 
-/* The current HTML uses .metric-heading.
-   The original stylesheet may use .metric-row labels directly. */
+/* New markup: label and value inside one heading */
 
 .metric-heading {
   display: grid;
@@ -560,16 +521,18 @@ p {
   line-height: 1.5;
 }
 
-/* Support existing markup that has no .metric-heading wrapper. */
+/* Support older markup with direct children */
 
 .metric-row > .metric-name {
   grid-column: 1;
 }
 
 .metric-row > .metric-val {
-  grid-column: 2;
-  text-align: right;
+  grid-column: 1;
+  text-align: left;
 }
+
+/* Progress bar */
 
 .metric-bar,
 .metric-track {
@@ -629,33 +592,6 @@ p {
 }
 
 .method-card p {
-  margin: 0;
-  color: var(--muted);
-  font-size: 0.92rem;
-}
-
-/* GENERAL CONTENT CARDS */
-
-.content-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 20px;
-}
-
-.content-card {
-  min-width: 0;
-  padding: 24px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface);
-}
-
-.content-card h3 {
-  margin: 0 0 12px;
-  font-size: 1.15rem;
-}
-
-.content-card p {
   margin: 0;
   color: var(--muted);
   font-size: 0.92rem;
@@ -762,18 +698,6 @@ p {
   font-size: 0.88rem;
 }
 
-.team-box {
-  padding: 26px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface);
-}
-
-.team-box p {
-  margin-bottom: 0;
-  color: var(--muted);
-}
-
 /* FOOTER */
 
 .site-footer,
@@ -792,15 +716,11 @@ footer {
   gap: 16px;
 }
 
-/* RESPONSIVE TABLET */
+/* TABLET */
 
 @media (max-width: 900px) {
   .method-grid,
   .team-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .content-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -810,7 +730,7 @@ footer {
   }
 }
 
-/* RESPONSIVE MOBILE */
+/* MOBILE */
 
 @media (max-width: 600px) {
   .wrap,
@@ -846,7 +766,6 @@ footer {
   }
 
   .hero-stats {
-    flex-wrap: wrap;
     gap: 22px;
   }
 
@@ -889,7 +808,6 @@ footer {
   .method-grid,
   .team-grid,
   .metric-defs,
-  .content-grid,
   .training-grid {
     grid-template-columns: minmax(0, 1fr);
   }
