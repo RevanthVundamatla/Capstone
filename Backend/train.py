@@ -23,6 +23,7 @@ matching what the deployed website does.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import random
 
@@ -317,304 +318,136 @@ def validation_score(results: dict) -> float:
 # =========================================================
 
 def train(args):
-
     global IMAGE_MAX_DIM
     IMAGE_MAX_DIM = args.max_dim
 
-    # -----------------------------------------------------
-    # Load dataset
-    # -----------------------------------------------------
-
-    pairs = list_pairs(
-        args.data_dir,
-        args.raw_folder,
-        args.ref_folder
-    )
-
-    print(
-        f"Loaded {len(pairs)} raw/reference pairs "
-        f"from {args.data_dir}"
-    )
-
-    # -----------------------------------------------------
-    # Split dataset
-    # -----------------------------------------------------
+    pairs = list_pairs(args.data_dir, args.raw_folder, args.ref_folder)
+    print(f"Loaded {len(pairs)} raw/reference pairs from {args.data_dir}")
 
     train_pairs, val_pairs, test_pairs = split_dataset(
-        pairs,
-        train_ratio=0.80,
-        val_ratio=0.10,
-        seed=args.seed
+        pairs, train_ratio=0.80, val_ratio=0.10, seed=args.seed
     )
+    if not train_pairs:
+        raise ValueError("The training split is empty. Check the dataset directory.")
+    if not val_pairs:
+        raise ValueError("The validation split is empty. Add more paired images.")
 
-    print()
-    print("Dataset split")
+    print("\nDataset split")
     print("-----------------------------")
     print(f"Training   : {len(train_pairs)}")
     print(f"Validation : {len(val_pairs)}")
     print(f"Test       : {len(test_pairs)}")
+    print(f"Epochs     : {args.epochs}")
     print(f"Max image side: {IMAGE_MAX_DIM}")
-    print("-----------------------------")
-    print()
+    print("-----------------------------\n")
 
-    # -----------------------------------------------------
-    # Create agent
-    # -----------------------------------------------------
-
-    agent = DDPGAgent(
-        device=args.device,
-        gamma=args.gamma,
-        tau=args.tau
-    )
-
+    agent = DDPGAgent(device=args.device, gamma=args.gamma, tau=args.tau)
     if args.resume and os.path.exists(args.resume):
-
         agent.load(args.resume)
-
         print(f"Resumed model from: {args.resume}")
 
-    # -----------------------------------------------------
-    # Replay buffer
-    # -----------------------------------------------------
-
     buffer = ReplayBuffer(capacity=args.buffer_size)
-
-    # -----------------------------------------------------
-    # Environment
-    # -----------------------------------------------------
-
     env = UnderwaterEnhanceEnv(max_steps=args.max_steps)
-
-    # -----------------------------------------------------
-    # Training variables
-    # -----------------------------------------------------
-
     noise_std = args.noise_start
-
-    reward_history = []
-    action_history = []
-
     best_val_score = -float("inf")
+    history = []
 
-    os.makedirs(
-        os.path.dirname(args.checkpoint),
-        exist_ok=True
-    )
+    checkpoint_dir = os.path.dirname(args.checkpoint)
+    if checkpoint_dir:
+        os.makedirs(checkpoint_dir, exist_ok=True)
+    best_dir = os.path.dirname(args.best_checkpoint)
+    if best_dir:
+        os.makedirs(best_dir, exist_ok=True)
+    history_dir = os.path.dirname(args.history_file)
+    if history_dir:
+        os.makedirs(history_dir, exist_ok=True)
 
-    best_checkpoint = args.best_checkpoint
+    # Each epoch is one complete pass through every training image pair.
+    for epoch in range(1, args.epochs + 1):
+        random.shuffle(train_pairs)
+        epoch_rewards = []
+        action_history = []
 
-    # =====================================================
-    # TRAINING LOOP
-    # =====================================================
+        for raw_path, ref_path in train_pairs:
+            raw_img, ref_img = load_pair(raw_path, ref_path)
+            state = env.reset(raw_img, ref_img)
+            episode_reward = 0.0
 
-    for episode in range(1, args.episodes + 1):
+            for _ in range(args.max_steps):
+                action = agent.select_action(state, noise_std=noise_std)
+                next_state, reward, done, info = env.step(action)
+                buffer.push(state, action, reward, next_state, float(done))
+                action_history.append(action)
+                state = next_state
+                episode_reward += float(reward)
+                agent.train_step(buffer, batch_size=args.batch_size)
+                if done:
+                    break
 
-        raw_path, ref_path = random.choice(train_pairs)
+            epoch_rewards.append(episode_reward)
+            noise_std = max(args.noise_end, noise_std * args.noise_decay)
 
-        raw_img, ref_img = load_pair(raw_path, ref_path)
-
-        state = env.reset(raw_img, ref_img)
-
-        episode_reward = 0.0
-
-        info = {}
-
-        # -------------------------------------------------
-        # Episode
-        # -------------------------------------------------
-
-        for _ in range(args.max_steps):
-
-            action = agent.select_action(
-                state,
-                noise_std=noise_std
-            )
-
-            (
-                next_state,
-                reward,
-                done,
-                info
-            ) = env.step(action)
-
-            buffer.push(
-                state,
-                action,
-                reward,
-                next_state,
-                float(done)
-            )
-
-            action_history.append(action)
-
-            state = next_state
-
-            episode_reward += reward
-
-            # ---------------------------------------------
-            # DDPG update
-            # ---------------------------------------------
-
-            agent.train_step(
-                buffer,
-                batch_size=args.batch_size
-            )
-
-            if done:
-                break
-
-        # -------------------------------------------------
-        # Noise decay
-        # -------------------------------------------------
-
-        noise_std = max(
-            args.noise_end,
-            noise_std * args.noise_decay
+        avg_reward = float(np.mean(epoch_rewards)) if epoch_rewards else 0.0
+        print(
+            f"Epoch {epoch:4d}/{args.epochs} | "
+            f"avg_reward={avg_reward:.4f} | noise_std={noise_std:.3f} | "
+            f"buffer={len(buffer)}"
         )
 
-        reward_history.append(episode_reward)
-
-        # =================================================
-        # LOGGING
-        # =================================================
-
-        if episode % args.log_every == 0:
-
-            avg_reward = np.mean(
-                reward_history[-args.log_every:]
-            )
-
-            print(
-                f"episode {episode:6d}  "
-                f"avg_reward={avg_reward:.4f}  "
-                f"noise_std={noise_std:.3f}  "
-                f"buffer={len(buffer)}  "
-                f"psnr={info.get('psnr', float('nan')):.2f}  "
-                f"ssim={info.get('ssim', float('nan')):.3f}  "
-                f"uiqm={info.get('uiqm', float('nan')):.3f}  "
-                f"uciqe={info.get('uciqe', float('nan')):.3f}  "
-                f"cast={info.get('cast', float('nan')):.3f}"
-            )
-
-            # Policy-collapse check: if the std of every action
-            # dimension is tiny, the agent applies the same edit to
-            # every image. Healthy training shows std > ~0.05.
-            recent = np.array(
-                action_history[-args.log_every * args.max_steps:]
-            )
-
-            if len(recent) > 0:
-
-                print(
-                    "    action mean:",
-                    np.round(recent.mean(axis=0), 2)
-                )
-
-                print(
-                    "    action std :",
-                    np.round(recent.std(axis=0), 2)
-                )
-
-            action_history = action_history[-args.log_every * args.max_steps:]
-
-        # =================================================
-        # VALIDATION
-        # =================================================
-
-        if episode % args.eval_every == 0:
-
-            print()
-            print(f"Evaluating validation set at episode {episode}...")
-
-            val_results = evaluate_agent(
-                agent,
-                val_pairs,
-                args.max_steps
-            )
-
+        # Evaluate the current policy each epoch so the graph has real values.
+        if epoch % args.eval_every == 0 or epoch == args.epochs:
+            val_results = evaluate_agent(agent, val_pairs, args.max_steps)
             score = validation_score(val_results)
+            record = {
+                "epoch": epoch,
+                "train_reward": avg_reward,
+                "psnr": val_results["psnr"],
+                "ssim": val_results["ssim"],
+                "uiqm": val_results["uiqm"],
+                "uciqe": val_results["uciqe"],
+                "cast": val_results["cast"],
+                "validation_score": score,
+            }
+            history.append(record)
 
             print(
-                f"Validation -> "
-                f"PSNR: {val_results['psnr']:.3f} | "
-                f"SSIM: {val_results['ssim']:.4f} | "
-                f"UIQM: {val_results['uiqm']:.4f} | "
-                f"UCIQE: {val_results['uciqe']:.4f} | "
-                f"CAST: {val_results['cast']:.4f} | "
-                f"SCORE: {score:.4f}"
+                f"  Validation | PSNR={record['psnr']:.3f} dB | "
+                f"SSIM={record['ssim']:.4f} | UIQM={record['uiqm']:.4f} | "
+                f"UCIQE={record['uciqe']:.4f} | CAST={record['cast']:.4f} | "
+                f"score={score:.4f}"
             )
 
             if score > best_val_score:
-
                 best_val_score = score
+                agent.save(args.best_checkpoint)
+                print(f"  Best model saved -> {args.best_checkpoint}")
 
-                agent.save(best_checkpoint)
+            with open(args.history_file, "w", encoding="utf-8") as f:
+                json.dump({"metrics": history}, f, indent=2)
+            print(f"  Metric history saved -> {args.history_file}")
 
-                print(f"  BEST MODEL SAVED -> {best_checkpoint}")
-
-            print()
-
-        # =================================================
-        # PERIODIC CHECKPOINT
-        # =================================================
-
-        if episode % args.save_every == 0:
-
+        if epoch % args.save_every == 0 or epoch == args.epochs:
             agent.save(args.checkpoint)
+            print(f"  Checkpoint saved -> {args.checkpoint}")
 
-            print(f"  checkpoint saved -> {args.checkpoint}")
-
-    # =====================================================
-    # FINAL MODEL
-    # =====================================================
-
-    agent.save(args.checkpoint)
-
-    print()
-    print("Training complete.")
+    print("\nTraining complete.")
     print(f"Latest checkpoint -> {args.checkpoint}")
+    print(f"Training history -> {args.history_file}")
 
-    # =====================================================
-    # LOAD BEST MODEL
-    # =====================================================
-
-    if os.path.exists(best_checkpoint):
-
-        print()
-        print("Loading best validation model:")
-        print(best_checkpoint)
-
-        best_agent = DDPGAgent(
-            device=args.device,
-            gamma=args.gamma,
-            tau=args.tau
-        )
-
-        best_agent.load(best_checkpoint)
-
-        # =================================================
-        # FINAL TEST
-        # =================================================
-
-        print()
-        print("Final test evaluation")
-        print("================================")
-
-        test_results = evaluate_agent(
-            best_agent,
-            test_pairs,
-            args.max_steps
-        )
-
-        print(f"PSNR  : {test_results['psnr']:.4f} dB")
-        print(f"SSIM  : {test_results['ssim']:.4f}")
-        print(f"UIQM  : {test_results['uiqm']:.4f}")
-        print(f"UCIQE : {test_results['uciqe']:.4f}")
-        print(f"CAST  : {test_results['cast']:.4f}")
-
-        print("================================")
-
-        print()
+    # Test once using the best validation checkpoint, if available.
+    if os.path.exists(args.best_checkpoint):
+        print("\nFinal test evaluation")
+        best_agent = DDPGAgent(device=args.device, gamma=args.gamma, tau=args.tau)
+        best_agent.load(args.best_checkpoint)
+        test_results = evaluate_agent(best_agent, test_pairs, args.max_steps) if test_pairs else None
+        if test_results:
+            print(f"PSNR  : {test_results['psnr']:.4f} dB")
+            print(f"SSIM  : {test_results['ssim']:.4f}")
+            print(f"UIQM  : {test_results['uiqm']:.4f}")
+            print(f"UCIQE : {test_results['uciqe']:.4f}")
+            print(f"CAST  : {test_results['cast']:.4f}")
+        else:
+            print("No test images available; skipped test evaluation.")
         print("Best model is ready for inference.")
 
 
@@ -630,7 +463,8 @@ def parse_args():
     p.add_argument("--raw-folder", default="raw")
     p.add_argument("--ref-folder", default="reference")
 
-    p.add_argument("--episodes", type=int, default=30000)
+    p.add_argument("--epochs", type=int, default=100,
+                   help="Number of complete passes through the training split")
     p.add_argument("--max-steps", type=int, default=3)
     p.add_argument("--batch-size", type=int, default=64)
     p.add_argument("--buffer-size", type=int, default=100_000)
@@ -651,9 +485,12 @@ def parse_args():
     p.add_argument("--best-checkpoint", default="checkpoints/best_ddpg_actor_critic.pt")
     p.add_argument("--resume", default=None)
 
-    p.add_argument("--log-every", type=int, default=50)
-    p.add_argument("--eval-every", type=int, default=500)
-    p.add_argument("--save-every", type=int, default=500)
+    p.add_argument("--eval-every", type=int, default=1,
+                   help="Evaluate and save metric history every N epochs")
+    p.add_argument("--save-every", type=int, default=10,
+                   help="Save the latest checkpoint every N epochs")
+    p.add_argument("--history-file", default="training_history.json",
+                   help="JSON file containing epoch-wise validation metrics")
 
     p.add_argument("--seed", type=int, default=42)
 
