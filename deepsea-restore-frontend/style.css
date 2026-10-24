@@ -1,0 +1,744 @@
+
+'use strict';
+
+/* ================================================================
+   DeepSea Restore — Frontend JavaScript
+   ================================================================ */
+
+// LOCAL DEVELOPMENT:
+// Start Flask on port 5000 and use this URL.
+const API_URL = 'http://127.0.0.1:5000';
+
+// For the deployed website, replace the line above with:
+// const API_URL = 'https://capstone-deepsea-restore-backend.onrender.com';
+
+const REQUEST_TIMEOUT_MS = 5 * 60 * 1000;
+const UIQM_BAR_MAX = 6;
+const UCIQE_BAR_MAX = 12;
+
+const $ = (selector) => document.querySelector(selector);
+
+const dropZone = $('#dropZone');
+const fileInput = $('#fileInput');
+const browseBtn = $('#browseBtn');
+const uploadPrompt = $('#uploadPrompt');
+const compareView = $('#compareView');
+const imgBefore = $('#imgBefore');
+const canvasAfter = $('#imgAfter');
+const resetBtn = $('#resetBtn');
+const refInput = $('#refInput');
+const statusMessage = $('#statusMessage');
+const downloadBtn = $('#downloadBtn');
+
+let isProcessing = false;
+let currentObjectUrl = null;
+let currentRestoredUrl = null;
+let historyCharts = {};
+
+/* ================================================================
+   Backend health check
+   ================================================================ */
+
+async function checkBackend() {
+  try {
+    const response = await fetch(`${API_URL}/api/health`);
+    const result = await response.json();
+
+    console.log('DeepSea Restore backend health:', result);
+    return result;
+  } catch (error) {
+    console.warn('Backend is not reachable yet:', error.message);
+    return null;
+  }
+}
+
+/* ================================================================
+   Status messages
+   ================================================================ */
+
+function showStatus(message) {
+  if (statusMessage) {
+    statusMessage.textContent = message;
+    statusMessage.hidden = false;
+  }
+}
+
+function hideStatus() {
+  if (statusMessage) {
+    statusMessage.textContent = '';
+    statusMessage.hidden = true;
+  }
+}
+
+/* ================================================================
+   Image upload events
+   ================================================================ */
+
+browseBtn.addEventListener('click', (event) => {
+  event.stopPropagation();
+
+  if (!isProcessing) {
+    fileInput.click();
+  }
+});
+
+dropZone.addEventListener('click', (event) => {
+  if (isProcessing || !compareView.hidden) return;
+  if (event.target === browseBtn) return;
+
+  fileInput.click();
+});
+
+dropZone.addEventListener('keydown', (event) => {
+  if (
+    event.target === dropZone &&
+    (event.key === 'Enter' || event.key === ' ')
+  ) {
+    event.preventDefault();
+
+    if (!isProcessing && compareView.hidden) {
+      fileInput.click();
+    }
+  }
+});
+
+['dragenter', 'dragover'].forEach((eventName) => {
+  dropZone.addEventListener(eventName, (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (!isProcessing) {
+      dropZone.classList.add('dragover');
+    }
+  });
+});
+
+['dragleave', 'drop'].forEach((eventName) => {
+  dropZone.addEventListener(eventName, (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    dropZone.classList.remove('dragover');
+  });
+});
+
+dropZone.addEventListener('drop', (event) => {
+  if (isProcessing) return;
+
+  const file = event.dataTransfer.files[0];
+
+  if (file) {
+    handleFile(file);
+  }
+});
+
+fileInput.addEventListener('change', (event) => {
+  const file = event.target.files[0];
+
+  if (file) {
+    handleFile(file);
+  }
+});
+
+resetBtn.addEventListener('click', resetDemo);
+
+/* ================================================================
+   File validation and display
+   ================================================================ */
+
+function handleFile(file) {
+  if (isProcessing) {
+    showStatus('Please wait for the current restoration to finish.');
+    return;
+  }
+
+  if (!file || !file.type.startsWith('image/')) {
+    alert('Please select a valid image file.');
+    return;
+  }
+
+  if (currentObjectUrl) {
+    URL.revokeObjectURL(currentObjectUrl);
+  }
+
+  currentObjectUrl = URL.createObjectURL(file);
+
+  imgBefore.onload = () => {
+    uploadPrompt.hidden = true;
+    compareView.hidden = false;
+    resetBtn.hidden = false;
+
+    clearMetrics();
+    restoreWithModel(file, canvasAfter);
+  };
+
+  imgBefore.onerror = () => {
+    showStatus('The selected image could not be opened.');
+    URL.revokeObjectURL(currentObjectUrl);
+    currentObjectUrl = null;
+  };
+
+  imgBefore.src = currentObjectUrl;
+}
+
+/* ================================================================
+   Reset demo
+   ================================================================ */
+
+function resetDemo() {
+  if (isProcessing) return;
+
+  compareView.hidden = true;
+  uploadPrompt.hidden = false;
+  resetBtn.hidden = true;
+
+  fileInput.value = '';
+
+  if (refInput) {
+    refInput.value = '';
+  }
+
+  if (currentObjectUrl) {
+    URL.revokeObjectURL(currentObjectUrl);
+    currentObjectUrl = null;
+  }
+
+  if (currentRestoredUrl) {
+    URL.revokeObjectURL(currentRestoredUrl);
+    currentRestoredUrl = null;
+  }
+
+  imgBefore.removeAttribute('src');
+
+  canvasAfter.width = 0;
+  canvasAfter.height = 0;
+
+  downloadBtn.hidden = true;
+  downloadBtn.removeAttribute('href');
+
+  clearMetrics();
+  hideStatus();
+}
+
+/* ================================================================
+   Clear metric values and bars
+   ================================================================ */
+
+function clearMetrics() {
+  document.querySelectorAll('.metric-fill').forEach((element) => {
+    element.style.width = '0%';
+  });
+
+  document.querySelectorAll('.metric-val').forEach((element) => {
+    element.textContent = '—';
+  });
+}
+
+/* ================================================================
+   Send image to Flask backend
+   ================================================================ */
+
+async function postImage(file) {
+  const formData = new FormData();
+
+  formData.append('image', file, file.name);
+
+  if (refInput && refInput.files.length > 0) {
+    const reference = refInput.files[0];
+
+    if (!reference.type.startsWith('image/')) {
+      throw new Error('The reference file must be an image.');
+    }
+
+    formData.append('reference', reference, reference.name);
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(
+    () => controller.abort(),
+    REQUEST_TIMEOUT_MS
+  );
+
+  try {
+    return await fetch(`${API_URL}/api/restore`, {
+      method: 'POST',
+      body: formData,
+      signal: controller.signal
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+/* ================================================================
+   Restore uploaded image
+   ================================================================ */
+
+async function restoreWithModel(file, targetCanvas) {
+  isProcessing = true;
+
+  browseBtn.disabled = true;
+  fileInput.disabled = true;
+
+  document.querySelectorAll('.metric-val').forEach((element) => {
+    element.textContent = '...';
+  });
+
+  showStatus(
+    'Sending image to the DDPG backend. The first request may take longer while the server starts.'
+  );
+
+  try {
+    console.log('Sending image to DeepSea Restore');
+    console.log('API URL:', API_URL);
+    console.log('Image:', file.name, file.type, file.size, 'bytes');
+    console.log('Reference supplied:', Boolean(refInput?.files?.[0]));
+
+    let response;
+
+    try {
+      response = await postImage(file);
+    } catch (error) {
+      if (error.name === 'AbortError') throw error;
+
+      console.warn('First request failed. Retrying once.', error);
+      showStatus('Connection failed. Retrying the backend request...');
+
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      response = await postImage(file);
+    }
+
+    const responseText = await response.text();
+
+    let result;
+
+    try {
+      result = JSON.parse(responseText);
+    } catch {
+      console.error('Backend returned:', responseText);
+      throw new Error(`Backend returned invalid JSON (HTTP ${response.status}).`);
+    }
+
+    if (!response.ok) {
+      throw new Error(
+        result.error ||
+        result.message ||
+        `Backend request failed with HTTP ${response.status}.`
+      );
+    }
+
+    if (!result.image) {
+      throw new Error('The backend response did not contain a restored image.');
+    }
+
+    await displayRestoredImage(result.image, targetCanvas);
+
+    if (result.metrics) {
+      updateMetrics(result.metrics);
+    } else {
+      console.warn('No metrics were returned.');
+      clearMetrics();
+    }
+
+    createDownloadLink(result.image);
+
+    showStatus('Image restoration completed successfully.');
+    console.log('Restoration response:', result);
+
+  } catch (error) {
+    console.error('Image restoration failed:', error);
+
+    clearMetrics();
+
+    let message = error.message || 'An unexpected error occurred.';
+
+    if (error.name === 'AbortError') {
+      message = 'The request timed out. Try a smaller image or try again.';
+    } else if (error instanceof TypeError) {
+      message =
+        `Could not connect to ${API_URL}. Check that Flask is running and that CORS permits your frontend origin.`;
+    }
+
+    showStatus(`Restoration failed: ${message}`);
+  } finally {
+    isProcessing = false;
+    browseBtn.disabled = false;
+    fileInput.disabled = false;
+  }
+}
+
+/* ================================================================
+   Display the restored image returned by the backend
+   ================================================================ */
+
+function displayRestoredImage(imageData, targetCanvas) {
+  return new Promise((resolve, reject) => {
+    const restoredImage = new Image();
+
+    restoredImage.onload = () => {
+      targetCanvas.width = restoredImage.naturalWidth;
+      targetCanvas.height = restoredImage.naturalHeight;
+
+      const context = targetCanvas.getContext('2d');
+
+      if (!context) {
+        reject(new Error('Could not create the output canvas.'));
+        return;
+      }
+
+      context.clearRect(
+        0,
+        0,
+        targetCanvas.width,
+        targetCanvas.height
+      );
+
+      context.drawImage(
+        restoredImage,
+        0,
+        0,
+        targetCanvas.width,
+        targetCanvas.height
+      );
+
+      resolve();
+    };
+
+    restoredImage.onerror = () => {
+      reject(new Error('The backend returned an invalid image.'));
+    };
+
+    if (
+      typeof imageData === 'string' &&
+      imageData.startsWith('data:image/')
+    ) {
+      restoredImage.src = imageData;
+    } else {
+      restoredImage.src = `data:image/png;base64,${imageData}`;
+    }
+  });
+}
+
+/* ================================================================
+   Download restored image
+   ================================================================ */
+
+function createDownloadLink(imageData) {
+  if (
+    typeof imageData !== 'string' ||
+    !imageData.length
+  ) {
+    return;
+  }
+
+  downloadBtn.href = imageData;
+  downloadBtn.download = 'deepsea-restored.png';
+  downloadBtn.hidden = false;
+}
+
+/* ================================================================
+   Display restoration metrics
+   ================================================================ */
+
+function updateMetrics(metrics) {
+  console.log('Restoration metrics:', metrics);
+
+  const config = {
+    psnr: { decimals: 2, suffix: ' dB' },
+    ssim: { decimals: 4, suffix: '' },
+    uiqm: { decimals: 4, suffix: '' },
+    uciqe: { decimals: 4, suffix: '' }
+  };
+
+  Object.entries(config).forEach(([key, settings]) => {
+    const row = document.querySelector(
+      `.metric-row[data-metric="${key}"]`
+    );
+
+    if (!row) return;
+
+    const valueElement = row.querySelector('.metric-val');
+    const fillElement = row.querySelector('.metric-fill');
+    const rawValue = metrics[key];
+
+    const missingText =
+      key === 'psnr' || key === 'ssim'
+        ? 'Needs reference'
+        : 'N/A';
+
+    if (
+      rawValue === undefined ||
+      rawValue === null ||
+      rawValue === ''
+    ) {
+      valueElement.textContent = missingText;
+      fillElement.style.width = '0%';
+      return;
+    }
+
+    const value = Number(rawValue);
+
+    if (!Number.isFinite(value)) {
+      valueElement.textContent = missingText;
+      fillElement.style.width = '0%';
+      return;
+    }
+
+    valueElement.textContent =
+      value.toFixed(settings.decimals) + settings.suffix;
+
+    let percentage = 0;
+
+    if (key === 'psnr') {
+      percentage = (value / 40) * 100;
+    } else if (key === 'ssim') {
+      percentage = value * 100;
+    } else if (key === 'uiqm') {
+      percentage = (value / UIQM_BAR_MAX) * 100;
+    } else if (key === 'uciqe') {
+      percentage = (value / UCIQE_BAR_MAX) * 100;
+    }
+
+    percentage = Math.max(0, Math.min(100, percentage));
+    fillElement.style.width = `${percentage}%`;
+  });
+}
+
+/* ================================================================
+   Training history — actual backend measurements only
+   ================================================================ */
+
+const HISTORY_URL = `${API_URL}/api/training-history`;
+
+const chartDefinitions = [
+  {
+    id: 'psnrChart',
+    key: 'psnr',
+    label: 'PSNR (dB)'
+  },
+  {
+    id: 'ssimChart',
+    key: 'ssim',
+    label: 'SSIM'
+  },
+  {
+    id: 'uiqmChart',
+    key: 'uiqm',
+    label: 'UIQM'
+  },
+  {
+    id: 'uciqeChart',
+    key: 'uciqe',
+    label: 'UCIQE'
+  }
+];
+
+function numericValue(value) {
+  if (value === undefined || value === null || value === '') {
+    return null;
+  }
+
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function normalizeHistory(payload) {
+  // Accept {history:[...]}, {epochs:[...]}, or a direct array.
+  const rows = Array.isArray(payload)
+    ? payload
+    : payload.history ?? payload.epochs;
+
+  if (!Array.isArray(rows)) {
+    throw new Error(
+      'Unexpected history response. Expected an array or a history array.'
+    );
+  }
+
+  return rows
+    .map((row) => ({
+      epoch: numericValue(row.epoch ?? row.epochs),
+      psnr: numericValue(row.psnr),
+      ssim: numericValue(row.ssim),
+      uiqm: numericValue(row.uiqm),
+      uciqe: numericValue(row.uciqe)
+    }))
+    .filter((row) => row.epoch !== null)
+    .sort((a, b) => a.epoch - b.epoch);
+}
+
+function renderHistoryChart(definition, history) {
+  const canvas = document.getElementById(definition.id);
+
+  if (!canvas) return;
+
+  if (typeof Chart === 'undefined') {
+    throw new Error('Chart.js did not load. Check your internet connection.');
+  }
+
+  const points = history
+    .filter((row) => row[definition.key] !== null)
+    .map((row) => ({
+      x: row.epoch,
+      y: row[definition.key]
+    }));
+
+  if (historyCharts[definition.id]) {
+    historyCharts[definition.id].destroy();
+  }
+
+  historyCharts[definition.id] = new Chart(canvas, {
+    type: 'line',
+    data: {
+      datasets: [{
+        label: definition.label,
+        data: points,
+        borderColor: '#79c7ce',
+        backgroundColor: 'rgba(121,199,206,0.15)',
+        borderWidth: 2,
+        pointRadius: points.length > 100 ? 0 : 3,
+        pointHoverRadius: 5,
+        tension: 0.15,
+        fill: false,
+        spanGaps: false
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      interaction: {
+        intersect: false,
+        mode: 'nearest'
+      },
+      plugins: {
+        legend: {
+          labels: {
+            color: '#e9f1f2'
+          }
+        },
+        tooltip: {
+          callbacks: {
+            title(items) {
+              return items.length
+                ? `Epoch ${items[0].parsed.x}`
+                : '';
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          type: 'linear',
+          title: {
+            display: true,
+            text: 'Epoch',
+            color: '#9bb6bc'
+          },
+          ticks: {
+            color: '#9bb6bc'
+          },
+          grid: {
+            color: 'rgba(180,220,225,0.10)'
+          }
+        },
+        y: {
+          title: {
+            display: true,
+            text: definition.label,
+            color: '#9bb6bc'
+          },
+          ticks: {
+            color: '#9bb6bc'
+          },
+          grid: {
+            color: 'rgba(180,220,225,0.10)'
+          }
+        }
+      }
+    }
+  });
+}
+
+async function loadTrainingHistory() {
+  const status = $('#historyStatus');
+  const refreshButton = $('#refreshHistoryBtn');
+
+  if (refreshButton) {
+    refreshButton.disabled = true;
+  }
+
+  if (status) {
+    status.textContent = 'Loading actual training history...';
+  }
+
+  try {
+    const response = await fetch(HISTORY_URL, {
+      cache: 'no-store'
+    });
+
+    const responseText = await response.text();
+
+    let payload;
+
+    try {
+      payload = JSON.parse(responseText);
+    } catch {
+      throw new Error(
+        `The backend returned invalid JSON (HTTP ${response.status}).`
+      );
+    }
+
+    if (!response.ok) {
+      throw new Error(
+        payload.error ||
+        payload.message ||
+        `History request failed (HTTP ${response.status}).`
+      );
+    }
+
+    const history = normalizeHistory(payload);
+
+    if (history.length === 0) {
+      throw new Error('No epoch records were found in the training history.');
+    }
+
+    chartDefinitions.forEach((definition) => {
+      renderHistoryChart(definition, history);
+    });
+
+    const lastEpoch = history[history.length - 1].epoch;
+
+    if (status) {
+      status.textContent =
+        `Loaded ${history.length} recorded entries. Latest recorded epoch: ${lastEpoch}.`;
+    }
+
+    console.log('Training history loaded:', history);
+
+  } catch (error) {
+    console.error('Training history could not be loaded:', error);
+
+    if (status) {
+      status.textContent =
+        `Training history unavailable: ${error.message}`;
+    }
+  } finally {
+    if (refreshButton) {
+      refreshButton.disabled = false;
+    }
+  }
+}
+
+const refreshHistoryBtn = $('#refreshHistoryBtn');
+
+if (refreshHistoryBtn) {
+  refreshHistoryBtn.addEventListener('click', loadTrainingHistory);
+}
+
+/* ================================================================
+   Page initialization
+   ================================================================ */
+
+document.addEventListener('DOMContentLoaded', () => {
+  checkBackend();
+  loadTrainingHistory();
+});
