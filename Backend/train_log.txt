@@ -1,0 +1,80 @@
+Paired 890 images by matching filename.
+Loaded 890 raw/reference pairs from data/UIEB
+
+Dataset split
+-----------------------------
+Training   : 712
+Validation : 89
+Test       : 89
+Max image side: 256
+-----------------------------
+
+episode     50  avg_reward=-0.1317  noise_std=0.495  buffer=150  psnr=9.90  ssim=0.611  uiqm=2.536  uciqe=0.463  cast=0.138
+    action mean: [-0.13 -0.24  0.08 -0.18 -0.26 -0.21 -0.07]
+    action std : [0.52 0.55 0.6  0.51 0.52 0.58 0.49]
+episode    100  avg_reward=-0.0635  noise_std=0.490  buffer=300  psnr=13.70  ssim=0.572  uiqm=3.610  uciqe=0.566  cast=0.107
+    action mean: [-0.72 -0.61  0.52  0.12 -0.74 -0.75  0.18]
+    action std : [0.34 0.44 0.48 0.64 0.37 0.31 0.67]
+
+Evaluating validation set at episode 100...
+Validation -> PSNR: 14.009 | SSIM: 0.6103 | UIQM: 3.3087 | UCIQE: 0.5325 | CAST: 0.1338 | SCORE: 0.4701
+  BEST MODEL SAVED -> checkpoints/best_ddpg_actor_critic.pt
+
+episode    150  avg_reward=-0.0084  noise_std=0.485  buffer=450  psnr=18.88  ssim=0.796  uiqm=3.332  uciqe=0.557  cast=0.084
+    action mean: [-0.6  -0.24  0.38 -0.2  -0.78 -0.85  0.13]
+    action std : [0.41 0.48 0.45 0.44 0.31 0.25 0.46]
+episode    200  avg_reward=0.0023  noise_std=0.480  buffer=600  psnr=17.22  ssim=0.803  uiqm=3.346  uciqe=0.620  cast=0.020
+    action mean: [-0.53 -0.19  0.42 -0.2  -0.79 -0.83  0.13]
+    action std : [0.43 0.5  0.44 0.47 0.31 0.26 0.5 ]
+
+Evaluating validation set at episode 200...
+Validation -> PSNR: 16.371 | SSIM: 0.7552 | UIQM: 2.8827 | UCIQE: 0.5429 | CAST: 0.0574 | SCORE: 0.5525
+  BEST MODEL SAVED -> checkpoints/best_ddpg_actor_critic.pt
+
+episode    250  avg_reward=0.0051  noise_std=0.476  buffer=750  psnr=14.09  ssim=0.647  uiqm=3.758  uciqe=0.574  cast=0.075
+    action mean: [-0.46  0.16  0.55 -0.32 -0.84 -0.75  0.11]
+    action std : [0.45 0.43 0.4  0.49 0.26 0.32 0.45]
+episode    300  avg_reward=-0.0102  noise_std=0.471  buffer=900  psnr=17.10  ssim=0.884  uiqm=3.441  uciqe=0.477  cast=0.051
+    action mean: [-0.46  0.1   0.49 -0.27 -0.83 -0.78 -0.04]
+    action std : [0.48 0.5  0.42 0.51 0.26 0.28 0.49]
+
+Evaluating validation set at episode 300...
+Validation -> PSNR: 16.761 | SSIM: 0.7801 | UIQM: 2.6973 | UCIQE: 0.5168 | CAST: 0.0734 | SCORE: 0.5417
+
+episode    350  avg_reward=0.0256  noise_std=0.466  buffer=1050  psnr=15.84  ssim=0.818  uiqm=2.232  uciqe=0.518  cast=0.044
+    action mean: [-0.45 -0.04  0.56 -0.34 -0.82 -0.79 -0.1 ]
+    action std : [0.49 0.51 0.39 0.49 0.26 0.29 0.57]
+episode    400  avg_reward=0.0268  noise_std=0.462  buffer=1200  psnr=20.78  ssim=0.924  uiqm=3.814  uciqe=0.586  cast=0.045
+    action mean: [-0.36  0.06  0.55 -0.26 -0.81 -0.81 -0.1 ]
+    action std : [0.52 0.48 0.44 0.48 0.27 0.27 0.54]
+
+Evaluating validation set at episode 400...
+Traceback (most recent call last):
+  File "C:\Users\revan\Downloads\Capstone-main\Capstone-main\Backend\train.py", line 674, in <module>
+    train(args)
+  File "C:\Users\revan\Downloads\Capstone-main\Capstone-main\Backend\train.py", line 529, in train
+    val_results = evaluate_agent(
+                  ^^^^^^^^^^^^^^^
+  File "C:\Users\revan\Downloads\Capstone-main\Capstone-main\Backend\train.py", line 277, in evaluate_agent
+    state, reward, done, info = env.step(action)
+                                ^^^^^^^^^^^^^^^^
+  File "C:\Users\revan\Downloads\Capstone-main\Capstone-main\Backend\enhancement\environment.py", line 201, in step
+    current_metrics = compute_metrics(
+                      ^^^^^^^^^^^^^^^^
+  File "C:\Users\revan\Downloads\Capstone-main\Capstone-main\Backend\enhancement\environment.py", line 83, in compute_metrics
+    "uiqm": float(uiqm(restored)),
+                  ^^^^^^^^^^^^^^
+  File "C:\Users\revan\Downloads\Capstone-main\Capstone-main\Backend\metrics\metrics.py", line 287, in uiqm
+    uiconm_value = _uiconm(img)
+                   ^^^^^^^^^^^^
+  File "C:\Users\revan\Downloads\Capstone-main\Capstone-main\Backend\metrics\metrics.py", line 238, in _uiconm
+    maximum = np.max(patch)
+              ^^^^^^^^^^^^^
+  File "C:\Users\revan\Downloads\Capstone-main\Capstone-main\Backend\.venv\Lib\site-packages\numpy\core\fromnumeric.py", line 2810, in max
+    return _wrapreduction(a, np.maximum, 'max', axis, None, out,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\revan\Downloads\Capstone-main\Capstone-main\Backend\.venv\Lib\site-packages\numpy\core\fromnumeric.py", line 88, in _wrapreduction
+    return ufunc.reduce(obj, axis, dtype, out, **passkwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+KeyboardInterrupt
+^C
