@@ -8,7 +8,7 @@
 // Local backend for development.
 // For the deployed website, change this to your deployed
 // Render backend URL.
-const API_URL = "http://127.0.0.1:5000";
+const API_URL = "https://capstone-deepsea-restore-backend.onrender.com";
 
 const REQUEST_TIMEOUT_MS = 5 * 60 * 1000;
 const UIQM_BAR_MAX = 6;
